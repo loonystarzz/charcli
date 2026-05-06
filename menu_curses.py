@@ -46,6 +46,15 @@ class MenuCursesInterface:
             curses.cbreak()
             stdscr.keypad(True)
             
+            # Try to make cursor visible, handle terminal compatibility
+            try:
+                curses.curs_set(1)  # Normal cursor
+            except:
+                try:
+                    curses.curs_set(2)  # Very visible cursor
+                except:
+                    pass  # Cursor visibility not supported in this terminal
+            
             # Colors
             if curses.has_colors():
                 curses.start_color()
@@ -78,11 +87,11 @@ class MenuCursesInterface:
             stdscr.clear()
             
             # Title
-            title = "=== GEMINI TUI ROLEPLAY ==="
+            title = "=== charcli ==="
             stdscr.addstr(0, (w - len(title)) // 2, title, curses.color_pair(1) | curses.A_BOLD)
             
             # Main menu options
-            menu_items = ["Select Character", "Select Persona", "Start Chat", "Load Chat", "Quit"]
+            menu_items = ["Select Character (for new chat)", "Select Persona (all chats)", "Start New Chat", "Load old Chat", "Quit"]
             menu_y = 3
             
             for i, item in enumerate(menu_items):
@@ -352,23 +361,47 @@ class MenuCursesInterface:
             for i in range(w):
                 stdscr.addch(sep_y, i, curses.ACS_HLINE, curses.color_pair(6))
             
+            # Calculate cursor position first
+            cursor_line, cursor_col = self._get_input_cursor_pos(w - 4)
+            cursor_line = min(cursor_line, input_height - 1)
+            
             # Input box with border
             input_y = sep_y + 1
-            # Draw input lines
+            # Draw input lines with visual cursor indicator
             for i in range(input_height):
                 if i < len(input_lines):
                     if i == 0:
                         stdscr.addstr(input_y + i, 0, ">> ", curses.A_BOLD)
-                        stdscr.addstr(input_y + i, 3, input_lines[i])
+                        # Add visual cursor indicator on this line if it's the cursor line
+                        if i == cursor_line and cursor_col < len(input_lines[i]):
+                            # Draw text before cursor
+                            stdscr.addstr(input_y + i, 3, input_lines[i][:cursor_col])
+                            # Highlight cursor position with reverse video
+                            if cursor_col < len(input_lines[i]):
+                                stdscr.addch(input_y + i, 3 + cursor_col, input_lines[i][cursor_col], curses.A_REVERSE)
+                            # Draw text after cursor
+                            if cursor_col + 1 < len(input_lines[i]):
+                                stdscr.addstr(input_y + i, 3 + cursor_col + 1, input_lines[i][cursor_col + 1:])
+                        else:
+                            stdscr.addstr(input_y + i, 3, input_lines[i])
                     else:
-                        stdscr.addstr(input_y + i, 3, input_lines[i])
+                        # Add visual cursor indicator on this line if it's the cursor line
+                        if i == cursor_line and cursor_col < len(input_lines[i]):
+                            # Draw text before cursor
+                            stdscr.addstr(input_y + i, 3, input_lines[i][:cursor_col])
+                            # Highlight cursor position with reverse video
+                            if cursor_col < len(input_lines[i]):
+                                stdscr.addch(input_y + i, 3 + cursor_col, input_lines[i][cursor_col], curses.A_REVERSE)
+                            # Draw text after cursor
+                            if cursor_col + 1 < len(input_lines[i]):
+                                stdscr.addstr(input_y + i, 3 + cursor_col + 1, input_lines[i][cursor_col + 1:])
+                        else:
+                            stdscr.addstr(input_y + i, 3, input_lines[i])
                 else:
                     if i == 0:
                         stdscr.addstr(input_y + i, 0, ">> ", curses.A_BOLD)
             
             # Position cursor in input box
-            cursor_line, cursor_col = self._get_input_cursor_pos(w - 4)
-            cursor_line = min(cursor_line, input_height - 1)
             try:
                 if cursor_line == 0:
                     stdscr.move(input_y + cursor_line, 3 + cursor_col)
@@ -481,6 +514,13 @@ class MenuCursesInterface:
                 self.send_message(stdscr)
                 self.input_buffer = ""
                 self._cursor_pos = 0
+            return
+        
+        # Backspace - handle multiple possible key codes
+        if key == curses.KEY_BACKSPACE or key == 127 or key == 8 or key == 263:  # Various backspace codes
+            if self._cursor_pos > 0:
+                self.input_buffer = self.input_buffer[:self._cursor_pos-1] + self.input_buffer[self._cursor_pos:]
+                self._cursor_pos -= 1
             return
         
         # Delete
@@ -791,10 +831,9 @@ class MenuCursesInterface:
         self.add_message(self.current_character['name'], scenario)
     
     def start_chat_session(self):
-        """Start chat session (either new or loaded)"""
-        # Don't reset if we already have loaded chat data
-        if not self.current_chat_id or not self.chat_lines:
-            self.start_new_chat()
+        """Start chat session (always start new when selected from main menu)"""
+        # Always start a new chat when selected from main menu
+        self.start_new_chat()
     
     def show_load_chat_menu(self, stdscr):
         """Show menu to load existing chats"""
