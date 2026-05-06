@@ -91,7 +91,7 @@ class MenuCursesInterface:
             stdscr.addstr(0, (w - len(title)) // 2, title, curses.color_pair(1) | curses.A_BOLD)
             
             # Main menu options
-            menu_items = ["Select Character (for new chat)", "Select Persona (all chats)", "Start New Chat", "Load old Chat", "Quit"]
+            menu_items = ["Select Character (for new chat)", "Select Persona (all chats)", "Start New Chat", "Load old Chat", "Character Maker", "Persona Maker", "Quit"]
             menu_y = 3
             
             for i, item in enumerate(menu_items):
@@ -158,7 +158,11 @@ class MenuCursesInterface:
                         stdscr.getch()
                 elif self.main_menu_focus == 3:  # Load Chat
                     self.show_load_chat_menu(stdscr)
-                elif self.main_menu_focus == 4:  # Quit
+                elif self.main_menu_focus == 4:  # Character Editor
+                    self.show_character_editor(stdscr)
+                elif self.main_menu_focus == 5:  # Persona Editor
+                    self.show_persona_editor(stdscr)
+                elif self.main_menu_focus == 6:  # Quit
                     self.running = False
     
     def show_character_selection(self, stdscr):
@@ -926,6 +930,410 @@ class MenuCursesInterface:
                 if data['name'] == persona_data['name']:
                     self.selected_persona = i + 1  # +1 because 0 is "No Persona"
                     break
+    
+    def show_character_editor(self, stdscr):
+        """Show character editor interface"""
+        h, w = stdscr.getmaxyx()
+        
+        # Character fields definition
+        fields = {
+            'name': {'label': 'Name:', 'value': '', 'required': True},
+            'age': {'label': 'Age:', 'value': '', 'required': True},
+            'title': {'label': 'Title:', 'value': '', 'required': True},
+            'basic_info': {'label': 'Basic Info:', 'value': '', 'required': True},
+            'personality': {'label': 'Personality:', 'value': '', 'required': True},
+            'speech_patterns': {'label': 'Speech Patterns (comma-separated):', 'value': '', 'required': False},
+            'appearance': {'label': 'Appearance:', 'value': '', 'required': True},
+            'background': {'label': 'Background:', 'value': '', 'required': True},
+            'goals': {'label': 'Goals:', 'value': '', 'required': True},
+            'fears': {'label': 'Fears:', 'value': '', 'required': True},
+            'scenario': {'label': 'Scenario:', 'value': '', 'required': True},
+            'filename': {'label': 'Filename (no spaces):', 'value': '', 'required': True}
+        }
+        
+        field_names = list(fields.keys())
+        current_field = 0
+        editing = True
+        
+        while editing and self.running:
+            stdscr.clear()
+            
+            # Title
+            title = "CHARACTER EDITOR"
+            stdscr.addstr(0, (w - len(title)) // 2, title, curses.color_pair(1) | curses.A_BOLD)
+            
+            # Instructions
+            instructions = "↑↓: Navigate | Enter: Edit field | Tab: Next field | \\: Save | Esc: Cancel"
+            stdscr.addstr(1, 2, instructions, curses.color_pair(3))
+            
+            # Display fields
+            y_pos = 3
+            for i, field_name in enumerate(field_names):
+                field = fields[field_name]
+                label = field['label']
+                value = field['value']
+                
+                # Show field label
+                label_attr = curses.color_pair(5) | curses.A_BOLD if i == current_field else curses.A_NORMAL
+                stdscr.addstr(y_pos, 2, label, label_attr)
+                
+                # Wrap field value for display
+                max_value_width = w - len(label) - 5
+                if value:
+                    wrapped_lines = self.wrap_text(value, max_value_width)
+                    for j, line in enumerate(wrapped_lines):
+                        if y_pos + j < h - 3:  # Don't go beyond screen
+                            value_attr = curses.color_pair(2) if value else curses.color_pair(8)
+                            stdscr.addstr(y_pos + j, len(label) + 3, line, value_attr)
+                    y_pos += len(wrapped_lines) - 1  # Account for wrapped lines
+                else:
+                    stdscr.addstr(y_pos, len(label) + 3, "", curses.color_pair(8))
+                
+                y_pos += 1
+            
+            # Status line
+            if current_field < len(field_names):
+                current_field_name = field_names[current_field]
+                status = f"Editing: {fields[current_field_name]['label']} | "
+                if fields[current_field_name]['required']:
+                    status += "Required field"
+                else:
+                    status += "Optional field"
+            else:
+                status = "Ready to save"
+            
+            stdscr.addstr(h-2, 2, status, curses.color_pair(3))
+            
+            # Save/Cancel hints
+            stdscr.addstr(h-1, 2, "\: Save Character | Esc: Cancel", curses.color_pair(3))
+            
+            stdscr.refresh()
+            
+            # Handle input
+            key = stdscr.getch()
+            
+            if key == 27:  # Esc - cancel
+                editing = False
+            elif key == curses.KEY_UP:
+                if current_field > 0:
+                    current_field -= 1
+            elif key == curses.KEY_DOWN:
+                if current_field < len(field_names) - 1:
+                    current_field += 1
+            elif key == ord('\t'):  # Tab - next field
+                if current_field < len(field_names) - 1:
+                    current_field += 1
+            elif key == ord('\\'):  # \ - save
+                # Validate required fields
+                valid = True
+                error_msg = ""
+                
+                for field_name in field_names:
+                    field = fields[field_name]
+                    if field['required'] and not field['value'].strip():
+                        valid = False
+                        error_msg = f"Required field '{field['label']}' is empty"
+                        break
+                
+                # Validate filename
+                if valid and 'filename' in fields:
+                    filename = fields['filename']['value'].strip()
+                    if not filename:
+                        valid = False
+                        error_msg = "Filename is required"
+                    elif ' ' in filename:
+                        valid = False
+                        error_msg = "Filename cannot contain spaces"
+                
+                if valid:
+                    self.save_character(fields)
+                    stdscr.addstr(h-2, 2, "Character saved successfully!", curses.color_pair(2))
+                    stdscr.refresh()
+                    stdscr.getch()
+                    editing = False
+                else:
+                    stdscr.addstr(h-2, 2, f"Error: {error_msg}", curses.color_pair(3) | curses.A_BOLD)
+                    stdscr.refresh()
+                    stdscr.getch()
+            elif key == ord('\n'):  # Enter - edit field
+                if current_field < len(field_names):
+                    field_name = field_names[current_field]
+                    new_value = self.edit_field_value(stdscr, fields[field_name]['label'], fields[field_name]['value'])
+                    if new_value is not None:
+                        fields[field_name]['value'] = new_value
+    
+    def show_persona_editor(self, stdscr):
+        """Show persona editor interface"""
+        h, w = stdscr.getmaxyx()
+        
+        # Persona fields definition
+        fields = {
+            'name': {'label': 'Name:', 'value': '', 'required': True},
+            'info': {'label': 'Info:', 'value': '', 'required': True},
+            'filename': {'label': 'Filename (no spaces):', 'value': '', 'required': True}
+        }
+        
+        field_names = list(fields.keys())
+        current_field = 0
+        editing = True
+        
+        while editing and self.running:
+            stdscr.clear()
+            
+            # Title
+            title = "PERSONA EDITOR"
+            stdscr.addstr(0, (w - len(title)) // 2, title, curses.color_pair(1) | curses.A_BOLD)
+            
+            # Instructions
+            instructions = "↑↓: Navigate | Enter: Edit field | Tab: Next field | \\: Save | Esc: Cancel"
+            stdscr.addstr(1, 2, instructions, curses.color_pair(3))
+            
+            # Display fields
+            y_pos = 3
+            for i, field_name in enumerate(field_names):
+                field = fields[field_name]
+                label = field['label']
+                value = field['value']
+                
+                # Show field label
+                label_attr = curses.color_pair(5) | curses.A_BOLD if i == current_field else curses.A_NORMAL
+                stdscr.addstr(y_pos, 2, label, label_attr)
+                
+                # Wrap field value for display
+                max_value_width = w - len(label) - 5
+                if value:
+                    wrapped_lines = self.wrap_text(value, max_value_width)
+                    for j, line in enumerate(wrapped_lines):
+                        if y_pos + j < h - 3:  # Don't go beyond screen
+                            value_attr = curses.color_pair(2) if value else curses.color_pair(8)
+                            stdscr.addstr(y_pos + j, len(label) + 3, line, value_attr)
+                    y_pos += len(wrapped_lines) - 1  # Account for wrapped lines
+                else:
+                    stdscr.addstr(y_pos, len(label) + 3, "", curses.color_pair(8))
+                
+                y_pos += 1
+            
+            # Status line
+            if current_field < len(field_names):
+                current_field_name = field_names[current_field]
+                status = f"Editing: {fields[current_field_name]['label']} | "
+                if fields[current_field_name]['required']:
+                    status += "Required field"
+                else:
+                    status += "Optional field"
+            else:
+                status = "Ready to save"
+            
+            stdscr.addstr(h-2, 2, status, curses.color_pair(3))
+            
+            # Save/Cancel hints
+            stdscr.addstr(h-1, 2, "\: Save Persona | Esc: Cancel", curses.color_pair(3))
+            
+            stdscr.refresh()
+            
+            # Handle input
+            key = stdscr.getch()
+            
+            if key == 27:  # Esc - cancel
+                editing = False
+            elif key == curses.KEY_UP:
+                if current_field > 0:
+                    current_field -= 1
+            elif key == curses.KEY_DOWN:
+                if current_field < len(field_names) - 1:
+                    current_field += 1
+            elif key == ord('\t'):  # Tab - next field
+                if current_field < len(field_names) - 1:
+                    current_field += 1
+            elif key == ord('\\'):  # \ - save
+                # Validate required fields
+                valid = True
+                error_msg = ""
+                
+                for field_name in field_names:
+                    field = fields[field_name]
+                    if field['required'] and not field['value'].strip():
+                        valid = False
+                        error_msg = f"Required field '{field['label']}' is empty"
+                        break
+                
+                # Validate filename
+                if valid and 'filename' in fields:
+                    filename = fields['filename']['value'].strip()
+                    if not filename:
+                        valid = False
+                        error_msg = "Filename is required"
+                    elif ' ' in filename:
+                        valid = False
+                        error_msg = "Filename cannot contain spaces"
+                
+                if valid:
+                    self.save_persona(fields)
+                    stdscr.addstr(h-2, 2, "Persona saved successfully!", curses.color_pair(2))
+                    stdscr.refresh()
+                    stdscr.getch()
+                    editing = False
+                else:
+                    stdscr.addstr(h-2, 2, f"Error: {error_msg}", curses.color_pair(3) | curses.A_BOLD)
+                    stdscr.refresh()
+                    stdscr.getch()
+            elif key == ord('\n'):  # Enter - edit field
+                if current_field < len(field_names):
+                    field_name = field_names[current_field]
+                    new_value = self.edit_field_value(stdscr, fields[field_name]['label'], fields[field_name]['value'])
+                    if new_value is not None:
+                        fields[field_name]['value'] = new_value
+    
+    def edit_field_value(self, stdscr, field_label, current_value):
+        """Edit a single field value with multi-line support"""
+        h, w = stdscr.getmaxyx()
+        
+        # Create a temporary edit window
+        edit_height = min(10, h - 10)
+        edit_width = w - 10
+        edit_win = curses.newwin(edit_height, edit_width, 5, 5)
+        edit_win.keypad(True)
+        
+        # Current editing state
+        lines = current_value.split('\n') if current_value else ['']
+        cursor_line = 0
+        cursor_col = len(lines[-1]) if lines else 0
+        editing = True
+        
+        while editing and self.running:
+            edit_win.clear()
+            edit_win.border()
+            
+            # Show field label
+            edit_win.addstr(0, 2, field_label, curses.color_pair(1) | curses.A_BOLD)
+            
+            # Show content with proper wrapping
+            content_y = 2
+            display_line_count = 0
+            for i, line in enumerate(lines):
+                if display_line_count >= edit_height - 3:
+                    break  # Don't exceed window height
+                
+                # Wrap long lines
+                if len(line) > edit_width - 4:
+                    wrapped_lines = self.wrap_text(line, edit_width - 4)
+                    for j, wrapped_line in enumerate(wrapped_lines):
+                        if display_line_count < edit_height - 3:
+                            edit_win.addstr(content_y + display_line_count, 2, wrapped_line)
+                            display_line_count += 1
+                else:
+                    edit_win.addstr(content_y + display_line_count, 2, line)
+                    display_line_count += 1
+            
+            # Position cursor
+            if cursor_line < len(lines) and cursor_line < edit_height - 3:
+                actual_col = min(cursor_col, len(lines[cursor_line]))
+                display_col = min(actual_col, edit_width - 4)
+                try:
+                    edit_win.move(content_y + cursor_line, 2 + display_col)
+                except:
+                    pass
+            
+            # Instructions
+            instructions = "Enter: New line | \\: Done | Esc: Cancel | ↑↓: Navigate | ←→: Move cursor"
+            edit_win.addstr(edit_height-2, 2, instructions[:edit_width-4], curses.color_pair(3))
+            
+            edit_win.refresh()
+            
+            # Handle input
+            key = edit_win.getch()
+            
+            if key == 27:  # Esc - cancel
+                return None
+            elif key == ord('\\'):  # \ - done
+                return '\n'.join(lines)
+            elif key == ord('\n'):  # Enter - new line
+                # Split current line at cursor position
+                current_line = lines[cursor_line]
+                before_cursor = current_line[:cursor_col]
+                after_cursor = current_line[cursor_col:]
+                lines[cursor_line] = before_cursor
+                lines.insert(cursor_line + 1, after_cursor)
+                cursor_line += 1
+                cursor_col = 0
+            elif key == curses.KEY_UP:
+                if cursor_line > 0:
+                    cursor_line -= 1
+                    cursor_col = min(cursor_col, len(lines[cursor_line]))
+            elif key == curses.KEY_DOWN:
+                if cursor_line < len(lines) - 1:
+                    cursor_line += 1
+                    cursor_col = min(cursor_col, len(lines[cursor_line]))
+            elif key == curses.KEY_LEFT:
+                if cursor_col > 0:
+                    cursor_col -= 1
+            elif key == curses.KEY_RIGHT:
+                if cursor_col < len(lines[cursor_line]):
+                    cursor_col += 1
+            elif key == curses.KEY_BACKSPACE or key == 127 or key == 8:  # Backspace
+                if cursor_col > 0:
+                    lines[cursor_line] = lines[cursor_line][:cursor_col-1] + lines[cursor_line][cursor_col:]
+                    cursor_col -= 1
+                elif cursor_line > 0:  # Join with previous line
+                    cursor_col = len(lines[cursor_line-1])
+                    lines[cursor_line-1] += lines[cursor_line]
+                    lines.pop(cursor_line)
+                    cursor_line -= 1
+            elif key == curses.KEY_DC:  # Delete
+                if cursor_col < len(lines[cursor_line]):
+                    lines[cursor_line] = lines[cursor_line][:cursor_col] + lines[cursor_line][cursor_col+1:]
+                elif cursor_line < len(lines) - 1:  # Join with next line
+                    lines[cursor_line] += lines[cursor_line+1]
+                    lines.pop(cursor_line + 1)
+            elif 32 <= key <= 126:  # Printable characters
+                char = chr(key)
+                lines[cursor_line] = lines[cursor_line][:cursor_col] + char + lines[cursor_line][cursor_col:]
+                cursor_col += 1
+    
+    def save_character(self, fields):
+        """Save character data to JSON file"""
+        # Prepare character data
+        character_data = {
+            'name': fields['name']['value'].strip(),
+            'age': int(fields['age']['value'].strip()) if fields['age']['value'].strip().isdigit() else 0,
+            'title': fields['title']['value'].strip(),
+            'basic_info': fields['basic_info']['value'].strip(),
+            'personality': fields['personality']['value'].strip(),
+            'speech_patterns': [s.strip() for s in fields['speech_patterns']['value'].split(',') if s.strip()],
+            'appearance': fields['appearance']['value'].strip(),
+            'background': fields['background']['value'].strip(),
+            'goals': fields['goals']['value'].strip(),
+            'fears': fields['fears']['value'].strip(),
+            'scenario': fields['scenario']['value'].strip()
+        }
+        
+        # Generate filename
+        filename = fields['filename']['value'].strip()
+        if not filename.endswith('.json'):
+            filename += '.json'
+        
+        # Save to file
+        filepath = os.path.join(self.character_manager.characters_dir, filename)
+        with open(filepath, 'w', encoding='utf-8') as f:
+            json.dump(character_data, f, indent=2, ensure_ascii=False)
+    
+    def save_persona(self, fields):
+        """Save persona data to JSON file"""
+        # Prepare persona data
+        persona_data = {
+            'name': fields['name']['value'].strip(),
+            'info': fields['info']['value'].strip()
+        }
+        
+        # Generate filename
+        filename = fields['filename']['value'].strip()
+        if not filename.endswith('.json'):
+            filename += '.json'
+        
+        # Save to file
+        filepath = os.path.join(self.persona_manager.personas_dir, filename)
+        with open(filepath, 'w', encoding='utf-8') as f:
+            json.dump(persona_data, f, indent=2, ensure_ascii=False)
 
 def run_menu_curses():
     """Entry point for menu-driven curses mode"""
