@@ -1194,6 +1194,15 @@ class MenuCursesInterface:
         edit_win = curses.newwin(edit_height, edit_width, 5, 5)
         edit_win.keypad(True)
         
+        # Make cursor visible in the edit window
+        try:
+            curses.curs_set(1)
+        except:
+            try:
+                curses.curs_set(2)
+            except:
+                pass
+        
         # Current editing state
         lines = current_value.split('\n') if current_value else ['']
         cursor_line = 0
@@ -1207,22 +1216,85 @@ class MenuCursesInterface:
             # Show field label
             edit_win.addstr(0, 2, field_label, curses.color_pair(1) | curses.A_BOLD)
             
-            # Show content with proper wrapping
+            # Show content with proper wrapping and visual cursor
             content_y = 2
             display_line_count = 0
+            cursor_display_line = -1
+            cursor_display_col = -1
+            
+            # Calculate cursor position in display coordinates
             for i, line in enumerate(lines):
                 if display_line_count >= edit_height - 3:
-                    break  # Don't exceed window height
+                    break
                 
                 # Wrap long lines
                 if len(line) > edit_width - 4:
                     wrapped_lines = self.wrap_text(line, edit_width - 4)
                     for j, wrapped_line in enumerate(wrapped_lines):
                         if display_line_count < edit_height - 3:
-                            edit_win.addstr(content_y + display_line_count, 2, wrapped_line)
+                            if i == cursor_line and j == 0 and cursor_col <= len(wrapped_line):
+                                cursor_display_line = display_line_count
+                                cursor_display_col = cursor_col
+                            elif i == cursor_line and j == 0 and cursor_col > len(wrapped_line):
+                                # Cursor is in a later wrapped line
+                                remaining_col = cursor_col - len(wrapped_line)
+                                if j < len(wrapped_lines) and remaining_col <= len(wrapped_lines[j]):
+                                    cursor_display_line = display_line_count
+                                    cursor_display_col = remaining_col
                             display_line_count += 1
                 else:
-                    edit_win.addstr(content_y + display_line_count, 2, line)
+                    if i == cursor_line and cursor_col <= len(line):
+                        cursor_display_line = display_line_count
+                        cursor_display_col = cursor_col
+                    display_line_count += 1
+            
+            # Now actually display the text with cursor highlighting
+            display_line_count = 0
+            for i, line in enumerate(lines):
+                if display_line_count >= edit_height - 3:
+                    break
+                
+                # Wrap long lines
+                if len(line) > edit_width - 4:
+                    wrapped_lines = self.wrap_text(line, edit_width - 4)
+                    for j, wrapped_line in enumerate(wrapped_lines):
+                        if display_line_count < edit_height - 3:
+                            # Check if this is the cursor line
+                            if display_line_count == cursor_display_line:
+                                # Draw text before cursor
+                                before_cursor = wrapped_line[:cursor_display_col]
+                                edit_win.addstr(content_y + display_line_count, 2, before_cursor)
+                                
+                                # Highlight cursor position
+                                if cursor_display_col < len(wrapped_line):
+                                    edit_win.addch(content_y + display_line_count, 2 + cursor_display_col, 
+                                                  wrapped_line[cursor_display_col], curses.A_REVERSE)
+                                
+                                # Draw text after cursor
+                                if cursor_display_col + 1 < len(wrapped_line):
+                                    after_cursor = wrapped_line[cursor_display_col + 1:]
+                                    edit_win.addstr(content_y + display_line_count, 2 + cursor_display_col + 1, after_cursor)
+                            else:
+                                edit_win.addstr(content_y + display_line_count, 2, wrapped_line)
+                            display_line_count += 1
+                else:
+                    # Check if this is the cursor line
+                    if display_line_count == cursor_display_line:
+                        # Draw text before cursor
+                        before_cursor = line[:cursor_display_col]
+                        edit_win.addstr(content_y + display_line_count, 2, before_cursor)
+                        
+                        # Highlight cursor position
+                        if cursor_display_col < len(line):
+                            edit_win.addch(content_y + display_line_count, 2 + cursor_display_col, 
+                                          line[cursor_display_col], curses.A_REVERSE)
+                        
+                        # Draw text after cursor
+                        if cursor_display_col + 1 < len(line):
+                            after_cursor = line[cursor_display_col + 1:]
+                            edit_win.addstr(content_y + display_line_count, 2 + cursor_display_col + 1, after_cursor)
+                    else:
+                        edit_win.addstr(content_y + display_line_count, 2, line)
                     display_line_count += 1
             
             # Position cursor
