@@ -843,6 +843,8 @@ class MenuCursesInterface:
         
         stdscr.refresh()
         stdscr.getch()  # Already blocking (timeout=-1 set before this was called)
+    
+    def send_message(self, stdscr=None):
         """Send message to AI"""
         # Check rate limiting (wait 2 seconds between API calls)
         current_time = datetime.now().timestamp()
