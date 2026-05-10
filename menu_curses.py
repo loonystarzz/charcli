@@ -35,6 +35,8 @@ class MenuCursesInterface:
         self.last_auto_save = 0
         self.last_api_call = 0  # For rate limiting
         self.scroll_offset = 0  # Scroll offset for chat history
+        self.scene_state = None  # Current scene state (location, outfits, plans, notes)
+        self.scene_view = False  # Toggle for fullscreen scene state view
         self.load_saved_chats()
         
     def run(self):
@@ -75,7 +77,10 @@ class MenuCursesInterface:
                     self.chat_loop(stdscr)
             
         except Exception as e:
-            print(f"Error: {e}")
+            import traceback
+            with open("/tmp/charcli_error.log", "w") as f:
+                f.write(traceback.format_exc())
+            print(f"Error: {e}\n(full traceback in /tmp/charcli_error.log)")
         finally:
             curses.endwin()
     
@@ -308,119 +313,150 @@ class MenuCursesInterface:
                 display_lines = self._build_display_lines(w)
                 self._rebuild_display = False
             
-            # Calculate input box size
-            input_lines = self._get_input_lines(w - 4)
-            input_height = max(1, len(input_lines))
-            min_input_height = 1
-            max_input_height = min(5, h // 3)
-            input_height = max(min_input_height, min(input_height, max_input_height))
-            
-            # Layout: title(1) + chat(remaining) + separator(1) + input(input_height) + status(1)
-            chat_height = h - 2 - input_height - 1  # title + separator + status
+            # Always define these so _handle_chat_key never gets a NameError
+            chat_height = h - 2
+            max_scroll = 0
             
             stdscr.clear()
-            
-            # Title bar
-            title = f" Chat with {self.current_character['name']} "
-            stdscr.addstr(0, 0, title.center(w), curses.color_pair(1) | curses.A_BOLD)
-            
-            # Chat area with scrolling
-            total_lines = len(display_lines)
-            max_scroll = max(0, total_lines - chat_height)
-            
-            # Clamp scroll offset
-            if self.scroll_offset > max_scroll:
-                self.scroll_offset = max_scroll
-            
-            # Determine which lines to show
-            if self.scroll_offset == 0:
-                # Default: show bottom (newest)
-                start = max(0, total_lines - chat_height)
+
+            if self.scene_view:
+                # ── SCENE STATE SCREEN ──────────────────────────────────────
+                title = f" Scene State — {self.current_character['name']} "
+                stdscr.addstr(0, 0, title.center(w), curses.color_pair(1) | curses.A_BOLD)
+                row = 2
+                if not self.scene_state:
+                    stdscr.addstr(row, 4, "No scene state yet — send a message first.", curses.color_pair(3))
+                else:
+                    s = self.scene_state
+                    def section(label, value):
+                        nonlocal row
+                        if row >= h - 2: return
+                        stdscr.addstr(row, 0, f"  {label}", curses.color_pair(4) | curses.A_BOLD)
+                        row += 1
+                        text = ', '.join(value) if isinstance(value, list) else str(value or '—')
+                        for line in (textwrap.wrap(text, w - 6) or ['—']):
+                            if row >= h - 2: break
+                            stdscr.addstr(row, 4, line, curses.color_pair(3))
+                            row += 1
+                        row += 1
+                    section("📍  LOCATION", s.get('location', ''))
+                    section("👥  CHARACTERS PRESENT", s.get('characters_present', []))
+                    outfits = s.get('outfits', {})
+                    if outfits and row < h - 2:
+                        stdscr.addstr(row, 0, "  👗  OUTFITS", curses.color_pair(4) | curses.A_BOLD)
+                        row += 1
+                        for name, outfit in outfits.items():
+                            if row >= h - 2: break
+                            stdscr.addstr(row, 4, f"{name}:", curses.color_pair(4))
+                            row += 1
+                            for line in (textwrap.wrap(outfit, w - 8) or ['—']):
+                                if row >= h - 2: break
+                                stdscr.addstr(row, 8, line, curses.color_pair(3))
+                                row += 1
+                        row += 1
+                    plans = s.get('plans', '')
+                    if plans and plans.lower() != 'none':
+                        section("🗺   PLANS", plans)
+                    notes = s.get('notes', '')
+                    if notes:
+                        section("📝  NOTES", notes)
+                status = " .s = back to chat | Esc = main menu "
+                try:
+                    stdscr.addstr(h - 1, 0, status.center(w)[:w-1], curses.color_pair(1))
+                except:
+                    pass
+                chat_height = h - 2  # dummy value, not used in scene view
+                max_scroll = 0
+
             else:
-                # Scrolled up from bottom
-                start = max(0, total_lines - chat_height - self.scroll_offset)
-            
-            # Render chat lines
-            for i in range(chat_height):
-                line_idx = start + i
-                if line_idx < total_lines:
-                    line = display_lines[line_idx]
-                    if line.startswith('['):
-                        stdscr.addstr(i + 1, 0, line[:w-1], curses.color_pair(4) | curses.A_BOLD)
+                # ── NORMAL CHAT SCREEN ───────────────────────────────────────
+                # Calculate input box size
+                input_lines = self._get_input_lines(w - 4)
+                input_height = max(1, len(input_lines))
+                min_input_height = 1
+                max_input_height = min(5, h // 3)
+                input_height = max(min_input_height, min(input_height, max_input_height))
+                
+                # Layout: title(1) + chat(remaining) + separator(1) + input(input_height) + status(1)
+                chat_height = h - 2 - input_height - 1
+                
+                # Title bar
+                title = f" Chat with {self.current_character['name']} "
+                stdscr.addstr(0, 0, title.center(w), curses.color_pair(1) | curses.A_BOLD)
+                
+                # Chat area with scrolling
+                total_lines = len(display_lines)
+                max_scroll = max(0, total_lines - chat_height)
+                if self.scroll_offset > max_scroll:
+                    self.scroll_offset = max_scroll
+                if self.scroll_offset == 0:
+                    start = max(0, total_lines - chat_height)
+                else:
+                    start = max(0, total_lines - chat_height - self.scroll_offset)
+                
+                for i in range(chat_height):
+                    line_idx = start + i
+                    if line_idx < total_lines:
+                        line = display_lines[line_idx]
+                        if line.startswith('['):
+                            stdscr.addstr(i + 1, 0, line[:w-1], curses.color_pair(4) | curses.A_BOLD)
+                        else:
+                            self.display_formatted_line(stdscr, i + 1, 2, line, w - 2)
+                
+                if total_lines > chat_height:
+                    if self.scroll_offset > 0:
+                        pct = int((start / max_scroll) * 100) if max_scroll > 0 else 0
+                        indicator = f"↑{pct}%"
                     else:
-                        self.display_formatted_line(stdscr, i + 1, 2, line, w - 2)
-            
-            # Scroll indicator on right side of chat area
-            if total_lines > chat_height:
-                # Show position indicator
+                        indicator = "↓end"
+                    stdscr.addstr(chat_height, w - len(indicator) - 1, indicator, curses.color_pair(3))
+                
+                # Separator line
+                sep_y = chat_height + 1
+                for i in range(w):
+                    stdscr.addch(sep_y, i, curses.ACS_HLINE, curses.color_pair(6))
+                
+                # Input box
+                cursor_line, cursor_col = self._get_input_cursor_pos(w - 4)
+                cursor_line = min(cursor_line, input_height - 1)
+                input_y = sep_y + 1
+                for i in range(input_height):
+                    if i < len(input_lines):
+                        if i == 0:
+                            stdscr.addstr(input_y + i, 0, ">> ", curses.A_BOLD)
+                            if i == cursor_line and cursor_col < len(input_lines[i]):
+                                stdscr.addstr(input_y + i, 3, input_lines[i][:cursor_col])
+                                if cursor_col < len(input_lines[i]):
+                                    stdscr.addch(input_y + i, 3 + cursor_col, input_lines[i][cursor_col], curses.A_REVERSE)
+                                if cursor_col + 1 < len(input_lines[i]):
+                                    stdscr.addstr(input_y + i, 3 + cursor_col + 1, input_lines[i][cursor_col + 1:])
+                            else:
+                                stdscr.addstr(input_y + i, 3, input_lines[i])
+                        else:
+                            if i == cursor_line and cursor_col < len(input_lines[i]):
+                                stdscr.addstr(input_y + i, 3, input_lines[i][:cursor_col])
+                                if cursor_col < len(input_lines[i]):
+                                    stdscr.addch(input_y + i, 3 + cursor_col, input_lines[i][cursor_col], curses.A_REVERSE)
+                                if cursor_col + 1 < len(input_lines[i]):
+                                    stdscr.addstr(input_y + i, 3 + cursor_col + 1, input_lines[i][cursor_col + 1:])
+                            else:
+                                stdscr.addstr(input_y + i, 3, input_lines[i])
+                    else:
+                        if i == 0:
+                            stdscr.addstr(input_y + i, 0, ">> ", curses.A_BOLD)
+                
+                try:
+                    stdscr.move(input_y + cursor_line, 3 + cursor_col)
+                except:
+                    pass
+                
+                # Status line
+                status_y = h - 1
                 if self.scroll_offset > 0:
-                    pct = int((start / max_scroll) * 100) if max_scroll > 0 else 0
-                    indicator = f"↑{pct}%"
+                    status = "↑ Scrolled up | ↑↓=scroll PgUp/Dn=page | .r=redo | .s=scene | Esc=menu"
                 else:
-                    indicator = "↓end"
-                stdscr.addstr(chat_height, w - len(indicator) - 1, indicator, curses.color_pair(3))
-            
-            # Separator line
-            sep_y = chat_height + 1
-            for i in range(w):
-                stdscr.addch(sep_y, i, curses.ACS_HLINE, curses.color_pair(6))
-            
-            # Calculate cursor position first
-            cursor_line, cursor_col = self._get_input_cursor_pos(w - 4)
-            cursor_line = min(cursor_line, input_height - 1)
-            
-            # Input box with border
-            input_y = sep_y + 1
-            # Draw input lines with visual cursor indicator
-            for i in range(input_height):
-                if i < len(input_lines):
-                    if i == 0:
-                        stdscr.addstr(input_y + i, 0, ">> ", curses.A_BOLD)
-                        # Add visual cursor indicator on this line if it's the cursor line
-                        if i == cursor_line and cursor_col < len(input_lines[i]):
-                            # Draw text before cursor
-                            stdscr.addstr(input_y + i, 3, input_lines[i][:cursor_col])
-                            # Highlight cursor position with reverse video
-                            if cursor_col < len(input_lines[i]):
-                                stdscr.addch(input_y + i, 3 + cursor_col, input_lines[i][cursor_col], curses.A_REVERSE)
-                            # Draw text after cursor
-                            if cursor_col + 1 < len(input_lines[i]):
-                                stdscr.addstr(input_y + i, 3 + cursor_col + 1, input_lines[i][cursor_col + 1:])
-                        else:
-                            stdscr.addstr(input_y + i, 3, input_lines[i])
-                    else:
-                        # Add visual cursor indicator on this line if it's the cursor line
-                        if i == cursor_line and cursor_col < len(input_lines[i]):
-                            # Draw text before cursor
-                            stdscr.addstr(input_y + i, 3, input_lines[i][:cursor_col])
-                            # Highlight cursor position with reverse video
-                            if cursor_col < len(input_lines[i]):
-                                stdscr.addch(input_y + i, 3 + cursor_col, input_lines[i][cursor_col], curses.A_REVERSE)
-                            # Draw text after cursor
-                            if cursor_col + 1 < len(input_lines[i]):
-                                stdscr.addstr(input_y + i, 3 + cursor_col + 1, input_lines[i][cursor_col + 1:])
-                        else:
-                            stdscr.addstr(input_y + i, 3, input_lines[i])
-                else:
-                    if i == 0:
-                        stdscr.addstr(input_y + i, 0, ">> ", curses.A_BOLD)
-            
-            # Position cursor in input box
-            try:
-                if cursor_line == 0:
-                    stdscr.move(input_y + cursor_line, 3 + cursor_col)
-                else:
-                    stdscr.move(input_y + cursor_line, 3 + cursor_col)
-            except:
-                pass
-            
-            # Status line
-            status_y = h - 1
-            if self.scroll_offset > 0:
-                status = f"↑ Scrolled up | ↑↓=scroll PgUp/Dn=page | .r=redo | Esc=menu"
-            else:
-                status = "↑↓=scroll PgUp/Dn=page | ←→=cursor | .+r=redo | Esc=menu | Enter=send"
-            stdscr.addstr(status_y, 0, status[:w-1], curses.color_pair(3))
+                    status = "↑↓=scroll PgUp/Dn=page | ←→=cursor | .r=redo | .s=scene | Esc=menu | Enter=send"
+                stdscr.addstr(status_y, 0, status[:w-1], curses.color_pair(3))
             
             stdscr.refresh()
             
@@ -470,6 +506,22 @@ class MenuCursesInterface:
     
     def _handle_chat_key(self, stdscr, key, chat_height, max_scroll):
         """Handle key input in chat mode"""
+        
+        # When scene view is active, only .s (toggle off) and Esc (main menu) work
+        if self.scene_view:
+            if key == 27:  # Esc - back to main menu
+                self.scene_view = False
+                self.save_current_chat()
+                self.current_screen = "main"
+                self.scroll_offset = 0
+            elif key == ord('.'):
+                stdscr.timeout(100)
+                next_key = stdscr.getch()
+                stdscr.timeout(-1)
+                if next_key == ord('s'):
+                    self.scene_view = False
+            return
+        
         # Esc - back to main menu
         if key == 27:
             self.save_current_chat()
@@ -497,16 +549,20 @@ class MenuCursesInterface:
             self.scroll_offset = max(0, self.scroll_offset - chat_height)
             return
         
-        # Dot command: .+r = regenerate (must be held together)
+        # Dot commands: .+r = regenerate, .+s = scene state overlay
         if key == ord('.') and not self.input_buffer:
-            # Check if r is immediately following
             stdscr.timeout(100)  # Short timeout to detect held keys
             next_key = stdscr.getch()
+            stdscr.timeout(-1)  # Reset to blocking BEFORE any sub-screen
             if next_key == ord('r'):
                 self.regenerate_last(stdscr)
                 return
+            elif next_key == ord('s'):
+                self.scene_view = not self.scene_view
+                self._rebuild_display = True
+                return
             elif next_key != -1:
-                # r not pressed, treat . as normal input
+                # neither r nor s, treat . as normal input
                 self.input_buffer += '.'
                 self._cursor_pos += 1
             return
@@ -676,7 +732,117 @@ class MenuCursesInterface:
         except:
             pass
     
-    def send_message(self, stdscr=None):
+    def _build_scene_state_lines(self, width):
+        """Build compact scene state display lines"""
+        if not self.scene_state:
+            return []
+        s = self.scene_state
+        lines = []
+        
+        loc = s.get('location', '')
+        plans = s.get('plans', '')
+        notes = s.get('notes', '')
+        outfits = s.get('outfits', {})
+        present = s.get('characters_present', [])
+        
+        # Line 1: location + present
+        present_str = ', '.join(present) if present else ''
+        loc_line = f"📍 {loc}"
+        if present_str:
+            loc_line += f"  👥 {present_str}"
+        lines.append(loc_line[:width-1])
+        
+        # Line 2: outfits
+        if outfits:
+            outfit_parts = [f"{k}: {v}" for k, v in outfits.items() if v]
+            outfit_line = "👗 " + " | ".join(outfit_parts)
+            lines.append(outfit_line[:width-1])
+        
+        # Line 3: plans / notes (combined if short enough)
+        extras = []
+        if plans and plans.lower() != 'none':
+            extras.append(f"🗺 {plans}")
+        if notes:
+            extras.append(f"📝 {notes}")
+        if extras:
+            combined = "  ".join(extras)
+            lines.append(combined[:width-1])
+        
+        return lines
+    
+    def _show_scene_state_overlay(self, stdscr):
+        """Show fullscreen scene state overlay. Press any key to dismiss."""
+        h, w = stdscr.getmaxyx()
+        stdscr.clear()
+        
+        # Title bar
+        title = f" Scene State — {self.current_character['name']} "
+        stdscr.addstr(0, 0, title.center(w), curses.color_pair(1) | curses.A_BOLD)
+        
+        row = 2
+        
+        if not self.scene_state:
+            stdscr.addstr(row, 4, "No scene state yet — send a message first.", curses.color_pair(3))
+            row += 1
+        else:
+            s = self.scene_state
+            
+            def section(label, value, color=curses.color_pair(3)):
+                nonlocal row
+                if row >= h - 2:
+                    return
+                header = f"  {label}"
+                stdscr.addstr(row, 0, header, curses.color_pair(4) | curses.A_BOLD)
+                row += 1
+                if isinstance(value, list):
+                    text = ', '.join(value) if value else '—'
+                    lines = textwrap.wrap(text, w - 6) or ['—']
+                else:
+                    lines = textwrap.wrap(str(value) if value else '—', w - 6) or ['—']
+                for line in lines:
+                    if row >= h - 2:
+                        break
+                    stdscr.addstr(row, 4, line, color)
+                    row += 1
+                row += 1  # blank line between sections
+            
+            section("📍  LOCATION", s.get('location', ''))
+            section("👥  CHARACTERS PRESENT", s.get('characters_present', []))
+            
+            outfits = s.get('outfits', {})
+            if outfits:
+                stdscr.addstr(row, 0, "  👗  OUTFITS", curses.color_pair(4) | curses.A_BOLD)
+                row += 1
+                for name, outfit in outfits.items():
+                    if row >= h - 2:
+                        break
+                    label_line = f"    {name}:"
+                    stdscr.addstr(row, 0, label_line, curses.color_pair(4))
+                    row += 1
+                    for line in (textwrap.wrap(outfit, w - 8) or ['—']):
+                        if row >= h - 2:
+                            break
+                        stdscr.addstr(row, 8, line, curses.color_pair(3))
+                        row += 1
+                row += 1
+            
+            plans = s.get('plans', '')
+            if plans and plans.lower() != 'none':
+                section("🗺   PLANS", plans)
+            
+            notes = s.get('notes', '')
+            if notes:
+                section("📝  NOTES", notes)
+        
+        # Footer
+        footer = " Press any key to close "
+        try:
+            stdscr.addstr(h - 1, 0, footer.center(w), curses.color_pair(1))
+        except:
+            pass
+        
+        stdscr.refresh()
+        stdscr.getch()  # Already blocking (timeout=-1 set before this was called)
         """Send message to AI"""
         # Check rate limiting (wait 2 seconds between API calls)
         current_time = datetime.now().timestamp()
@@ -694,16 +860,22 @@ class MenuCursesInterface:
         # Get AI response
         current_persona = self.persona_manager.get_current_persona()
         try:
-            response = self.gemini_client.send_message(
+            raw_response = self.gemini_client.send_message(
                 self.current_character, 
                 self.input_buffer, 
                 self.conversation_history[:-1],  # Exclude the message we just added
-                current_persona
+                current_persona,
+                self.scene_state
             )
             self.last_api_call = current_time
             
-            # Add AI response
-            self.add_message(self.current_character['name'], response)
+            # Extract scene state from response
+            clean_response, new_scene_state = self.gemini_client.extract_scene_state(raw_response)
+            if new_scene_state:
+                self.scene_state = new_scene_state
+            
+            # Add AI response (clean, without scene_state block)
+            self.add_message(self.current_character['name'], clean_response)
             
             # Auto-save chat
             self.save_current_chat()
@@ -763,16 +935,22 @@ class MenuCursesInterface:
         # Re-send the user message
         current_persona = self.persona_manager.get_current_persona()
         try:
-            response = self.gemini_client.send_message(
+            raw_response = self.gemini_client.send_message(
                 self.current_character,
                 user_msg,
                 self.conversation_history,
-                current_persona
+                current_persona,
+                self.scene_state
             )
             self.last_api_call = datetime.now().timestamp()
             
+            # Extract and update scene state
+            clean_response, new_scene_state = self.gemini_client.extract_scene_state(raw_response)
+            if new_scene_state:
+                self.scene_state = new_scene_state
+            
             # Add the new AI response
-            self.add_message(char_name, response)
+            self.add_message(char_name, clean_response)
             self._rebuild_display = True  # Force rebuild since we changed the display
             self.save_current_chat()
         except Exception as e:
@@ -808,6 +986,7 @@ class MenuCursesInterface:
             'persona': self.persona_manager.get_current_persona(),
             'conversation_history': self.conversation_history,
             'chat_lines': self.chat_lines,
+            'scene_state': self.scene_state,
             'last_updated': str(datetime.now())
         }
         
@@ -829,6 +1008,7 @@ class MenuCursesInterface:
         # Reset chat data
         self.conversation_history = []
         self.chat_lines = []
+        self.scene_state = None
         
         # Add scenario message
         scenario = self.current_character.get('scenario', f"Hello! I'm {self.current_character['name']}. {self.current_character['basic_info']}")
@@ -891,6 +1071,10 @@ class MenuCursesInterface:
                 if chat_list:
                     chat_id, chat_data = chat_list[chat_focus]
                     self.load_chat(chat_data)
+                    # If no scene state, ask user if they want to add it
+                    if self.scene_state is None and self.conversation_history:
+                        if self._prompt_update_scene_state(stdscr):
+                            self._run_update_scene_state(stdscr)
                     self.current_screen = "chat"
                     break
     
@@ -904,6 +1088,9 @@ class MenuCursesInterface:
         
         # Restore chat lines properly
         self.chat_lines = chat_data.get('chat_lines', [])
+        
+        # Restore scene state
+        self.scene_state = chat_data.get('scene_state', None)
         
         # Set persona if it exists
         persona_data = chat_data.get('persona')
@@ -930,6 +1117,79 @@ class MenuCursesInterface:
                 if data['name'] == persona_data['name']:
                     self.selected_persona = i + 1  # +1 because 0 is "No Persona"
                     break
+    
+    def _prompt_update_scene_state(self, stdscr) -> bool:
+        """Ask the user if they want to generate scene state for this old chat. Returns True if yes."""
+        h, w = stdscr.getmaxyx()
+        stdscr.clear()
+        title = "SCENE STATE NOT FOUND"
+        stdscr.addstr(0, (w - len(title)) // 2, title, curses.color_pair(1) | curses.A_BOLD)
+        
+        msg_lines = [
+            "This chat doesn't have scene state tracking yet.",
+            "(location, outfits, plans, notes)",
+            "",
+            "Would you like to analyze the chat log and add it?",
+            "A backup will be saved as <chatid>_backup.json",
+            "",
+            "  Y - Yes, analyze and add scene state",
+            "  N - No, continue without it",
+        ]
+        for i, line in enumerate(msg_lines):
+            stdscr.addstr(3 + i, 4, line, curses.color_pair(3))
+        
+        stdscr.refresh()
+        while True:
+            key = stdscr.getch()
+            if key in (ord('y'), ord('Y')):
+                return True
+            if key in (ord('n'), ord('N'), 27):
+                return False
+    
+    def _run_update_scene_state(self, stdscr):
+        """Run AI analysis to generate initial scene state, save backup, update chat file."""
+        h, w = stdscr.getmaxyx()
+        stdscr.clear()
+        msg = " Analyzing chat history, please wait... "
+        stdscr.addstr(h // 2, max(0, (w - len(msg)) // 2), msg, curses.color_pair(3) | curses.A_BOLD)
+        stdscr.refresh()
+        
+        current_persona = self.persona_manager.get_current_persona()
+        new_state = self.gemini_client.generate_initial_scene_state(
+            self.current_character,
+            self.conversation_history,
+            current_persona
+        )
+        
+        if new_state:
+            self.scene_state = new_state
+            
+            # Save backup of old chat file
+            old_filepath = os.path.join(self.chats_dir, f"{self.current_chat_id}.json")
+            backup_filepath = os.path.join(self.chats_dir, f"{self.current_chat_id}_backup.json")
+            try:
+                if os.path.exists(old_filepath):
+                    import shutil
+                    shutil.copy2(old_filepath, backup_filepath)
+            except Exception:
+                pass
+            
+            # Save updated chat (now includes scene_state)
+            self.save_current_chat()
+            
+            # Show success
+            stdscr.clear()
+            stdscr.addstr(h // 2 - 1, 4, "Scene state generated successfully!", curses.color_pair(2) | curses.A_BOLD)
+            stdscr.addstr(h // 2, 4, f"Backup saved as: {self.current_chat_id}_backup.json", curses.color_pair(3))
+            stdscr.addstr(h // 2 + 1, 4, "Press any key to continue...", curses.color_pair(3))
+            stdscr.refresh()
+            stdscr.getch()
+        else:
+            stdscr.clear()
+            stdscr.addstr(h // 2, 4, "Could not generate scene state. Continuing without it.", curses.color_pair(3))
+            stdscr.addstr(h // 2 + 1, 4, "Press any key...", curses.color_pair(3))
+            stdscr.refresh()
+            stdscr.getch()
     
     def show_character_editor(self, stdscr):
         """Show character editor interface"""

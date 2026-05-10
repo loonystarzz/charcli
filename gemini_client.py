@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import google.generativeai as genai
 from typing import Dict, List, Optional
 
@@ -45,12 +46,34 @@ IMPORTANT ROLEPLAYING INSTRUCTIONS:
 6. Keep responses engaging and in character
 7. Use the speech examples as inspiration for your natural dialogue style
 8. CRITICAL FORMATTING RULE: Use quotation marks ("") for all spoken dialogue and asterisks (**) for all actions, movements, and descriptions. Example: "You seem quite... mysterious." *He stares at you across the table, trying to read you* "You know, I think I've taken a liking to you."
+9. RESPONSE LENGTH: Keep your roleplay response under 1000 characters. Be vivid but concise.
+
+SCENE STATE TRACKING (VERY IMPORTANT):
+Every response you give MUST end with a JSON block (on its own line) wrapped in <scene_state> tags.
+This block tracks the current state of the scene. You MUST update any field that changed during this response.
+
+The JSON must follow this exact structure:
+<scene_state>
+{{
+  "location": "current location/setting where the scene takes place",
+  "characters_present": ["list of character names currently in the scene"],
+  "outfits": {{"CharacterName": "what they are currently wearing", "User": "what the user/their character is wearing if known"}},
+  "plans": "current plans or goals for the immediate future, or 'none'",
+  "notes": "any other important scene context: ongoing events, objects, mood, time of day, etc."
+}}
+</scene_state>
+
+Rules for scene state:
+- ALWAYS include the <scene_state> block at the end of EVERY response, no exceptions.
+- Update the state to reflect what just happened in this response (new location, outfit change, character left/arrived, new plans formed, etc.).
+- The state represents the situation AFTER this response, not before.
+- The roleplay response (dialogue/actions) comes FIRST, then the <scene_state> block.
 
 Begin the roleplay now. The user will interact with you, and you must respond as {character_data['name']}. Maintain this persona throughout the entire conversation."""
         
         return prompt
     
-    def send_message(self, character_data: Dict, message: str, conversation_history: List[Dict] = None, user_persona: Optional[Dict] = None) -> str:
+    def send_message(self, character_data: Dict, message: str, conversation_history: List[Dict] = None, user_persona: Optional[Dict] = None, scene_state: Optional[Dict] = None) -> str:
         """Send a message to Gemini with character context"""
         if conversation_history is None:
             conversation_history = []
@@ -59,21 +82,88 @@ Begin the roleplay now. The user will interact with you, and you must respond as
         system_prompt = self.create_character_prompt(character_data, user_persona)
         
         # Build the conversation context
-        full_conversation = [{"role": "user", "parts": [system_prompt]}, {"role": "model", "parts": ["Understood. I will stay in character as " + character_data['name'] + " and follow all instructions."]}]
+        full_conversation = [{"role": "user", "parts": [system_prompt]}, {"role": "model", "parts": ["Understood. I will stay in character as " + character_data['name'] + " and follow all instructions, including always appending the <scene_state> JSON block at the end of every response."]}]
         
         # Add conversation history (but limit to last 20 messages to avoid quota issues)
         recent_history = conversation_history[-20:] if len(conversation_history) > 20 else conversation_history
         for msg in recent_history:
             full_conversation.append(msg)
         
+        # Build the user message, injecting current scene state as context
+        user_message = message
+        if scene_state:
+            state_context = f"""[CURRENT SCENE STATE - use this as accurate context for what's happening right now]:
+<scene_state>
+{json.dumps(scene_state, indent=2)}
+</scene_state>
+
+My message: {message}"""
+            user_message = state_context
+        
         # Add the current user message
-        full_conversation.append({"role": "user", "parts": [message]})
+        full_conversation.append({"role": "user", "parts": [user_message]})
         
         try:
             response = self.model.generate_content(full_conversation)
             return response.text
         except Exception as e:
             return f"Error: {str(e)}"
+    
+    def extract_scene_state(self, response_text: str) -> tuple:
+        """Extract scene state JSON from response and return (clean_response, scene_state_dict)"""
+        scene_state = None
+        clean_response = response_text
+        
+        # Look for <scene_state>...</scene_state> block
+        pattern = r'<scene_state>\s*(.*?)\s*</scene_state>'
+        match = re.search(pattern, response_text, re.DOTALL)
+        
+        if match:
+            json_str = match.group(1).strip()
+            try:
+                scene_state = json.loads(json_str)
+            except Exception:
+                scene_state = None
+            # Remove the scene_state block from the response
+            clean_response = re.sub(pattern, '', response_text, flags=re.DOTALL).strip()
+        
+        return clean_response, scene_state
+    
+    def generate_initial_scene_state(self, character_data: Dict, conversation_history: List[Dict], user_persona: Optional[Dict] = None) -> Optional[Dict]:
+        """Analyze full chat history and generate initial scene state for old chats"""
+        # Build a summary of the chat for analysis
+        history_text = ""
+        for msg in conversation_history:
+            role = "User" if msg['role'] == 'user' else character_data.get('name', 'Character')
+            parts = msg.get('parts', [''])
+            history_text += f"{role}: {parts[0]}\n\n"
+        
+        analysis_prompt = f"""You are analyzing a roleplay chat log between a user and the character {character_data['name']}.
+
+Based on the following conversation history, determine the current scene state at the END of the conversation.
+
+CONVERSATION:
+{history_text[-8000:]}  
+
+Respond ONLY with a JSON object (no other text, no markdown) in this exact format:
+{{
+  "location": "current location/setting at end of chat",
+  "characters_present": ["list of character names present"],
+  "outfits": {{"CharacterName": "what they are wearing", "User": "what user's character wears if mentioned"}},
+  "plans": "any plans or goals formed by end of chat, or 'none'",
+  "notes": "other important context: ongoing events, objects, mood, time of day, etc."
+}}"""
+
+        try:
+            response = self.model.generate_content([{"role": "user", "parts": [analysis_prompt]}])
+            text = response.text.strip()
+            # Strip markdown fences if present
+            text = re.sub(r'^```json\s*', '', text)
+            text = re.sub(r'^```\s*', '', text)
+            text = re.sub(r'\s*```$', '', text)
+            return json.loads(text.strip())
+        except Exception as e:
+            return None
     
     def create_chat_session(self, character_data: Dict, user_persona: Optional[Dict] = None) -> str:
         """Create a new chat session with character"""
