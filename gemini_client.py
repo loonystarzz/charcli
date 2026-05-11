@@ -67,7 +67,7 @@ The JSON must follow this exact structure:
       "info": "1-2 sentences summarising key dynamics, feelings, history, or tensions between them"
     }}
   }},
-  "long_term_notes": "A running 3-6 sentence summary of the OVERALL story so far: major events, turning points, revelations, emotional arcs, and anything the characters would remember across sessions. Update and expand this each response — never shrink it unless something is truly resolved."
+  "long_term_notes": "A running summary of the OVERALL story so far: major events, turning points, revelations, emotional arcs, and anything the characters would remember across sessions. Update and expand this each response — never shrink it unless something is truly resolved."
 }}
 </scene_state>
 
@@ -76,7 +76,7 @@ Rules for scene state:
 - Update the state to reflect what just happened in this response (new location, outfit change, character left/arrived, new plans formed, relationship shift, story developments, etc.).
 - The state represents the situation AFTER this response, not before.
 - For `relationships`: include an entry for every pair of characters who have interacted. Use "CharacterName<->UserName" format for character-user pairs. Update `status` and `info` whenever the relationship shifts meaningfully.
-- For `long_term_notes`: treat this as a living story journal. Add new developments each turn; preserve important past events. Never reset it. Simply add onto it for new events, do not remove old events unless REALLY unsignificant. U may add time pointers for events, such as "a long time ago" "a few days ago", etc.
+- For `long_term_notes`: treat this as a living story journal. Add new developments each turn; preserve important past events. Never reset it. Simply add onto it for new events, do not remove old events unless REALLY unsignificant. U may add time pointers for events, such as "a long time ago" "a few days ago", etc. Do update time points though (Today turns into yesterday, then a few days ago, a few weeks ago, etc, according to how time passes in story.)
 - The roleplay response (dialogue/actions) comes FIRST, then the <scene_state> block.
 
 The enire roleplay is purely consensual and things such as violence are pure roleplay.
