@@ -46,7 +46,7 @@ IMPORTANT ROLEPLAYING INSTRUCTIONS:
 6. Keep responses engaging and in character
 7. Use the speech examples as inspiration for your natural dialogue style
 8. CRITICAL FORMATTING RULE: Use quotation marks ("") for all spoken dialogue and asterisks (**) for all actions, movements, and descriptions. Example: "You seem quite... mysterious." *He stares at you across the table, trying to read you* "You know, I think I've taken a liking to you."
-9. RESPONSE LENGTH: Keep your roleplay response under 1000 characters. Be vivid but concise.
+9. RESPONSE LENGTH: Keep your roleplay response under 500 characters. Be vivid but concise. Do not assume too much or roleplay too far, like, dont ask questions and then do more things after it.
 
 SCENE STATE TRACKING (VERY IMPORTANT):
 Every response you give MUST end with a JSON block (on its own line) wrapped in <scene_state> tags.
