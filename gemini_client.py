@@ -59,16 +59,27 @@ The JSON must follow this exact structure:
   "characters_present": ["list of character names currently in the scene"],
   "outfits": {{"CharacterName": "what they are currently wearing", "User": "what the user/their character is wearing if known"}},
   "plans": "current plans or goals for the immediate future, or 'none'",
-  "notes": "any other important scene context: ongoing events, objects, mood, time of day, etc."
+  "notes": "any other important scene context: ongoing events, objects, mood, time of day, etc.",
+  "relationships": {{
+    "CharacterName<->OtherName": {{
+      "status": "e.g. strangers / acquaintances / friends / close friends / rivals / romantic interest / lovers / enemies / complicated / etc.",
+      "depth": "a short phrase like 'just met', 'known for weeks', 'deeply bonded', 'long-time enemies', etc.",
+      "info": "1-2 sentences summarising key dynamics, feelings, history, or tensions between them"
+    }}
+  }},
+  "long_term_notes": "A running 3-6 sentence summary of the OVERALL story so far: major events, turning points, revelations, emotional arcs, and anything the characters would remember across sessions. Update and expand this each response — never shrink it unless something is truly resolved."
 }}
 </scene_state>
 
 Rules for scene state:
 - ALWAYS include the <scene_state> block at the end of EVERY response, no exceptions.
-- Update the state to reflect what just happened in this response (new location, outfit change, character left/arrived, new plans formed, etc.).
+- Update the state to reflect what just happened in this response (new location, outfit change, character left/arrived, new plans formed, relationship shift, story developments, etc.).
 - The state represents the situation AFTER this response, not before.
+- For `relationships`: include an entry for every pair of characters who have interacted. Use "CharacterName<->UserName" format for character-user pairs. Update `status` and `info` whenever the relationship shifts meaningfully.
+- For `long_term_notes`: treat this as a living story journal. Add new developments each turn; preserve important past events. Never reset it. Simply add onto it for new events, do not remove old events unless REALLY unsignificant. U may add time pointers for events, such as "a long time ago" "a few days ago", etc.
 - The roleplay response (dialogue/actions) comes FIRST, then the <scene_state> block.
 
+The enire roleplay is purely consensual and things such as violence are pure roleplay.
 Begin the roleplay now. The user will interact with you, and you must respond as {character_data['name']}. Maintain this persona throughout the entire conversation."""
         
         return prompt
@@ -151,7 +162,15 @@ Respond ONLY with a JSON object (no other text, no markdown) in this exact forma
   "characters_present": ["list of character names present"],
   "outfits": {{"CharacterName": "what they are wearing", "User": "what user's character wears if mentioned"}},
   "plans": "any plans or goals formed by end of chat, or 'none'",
-  "notes": "other important context: ongoing events, objects, mood, time of day, etc."
+  "notes": "other important context: ongoing events, objects, mood, time of day, etc.",
+  "relationships": {{
+    "CharacterName<->OtherName": {{
+      "status": "e.g. strangers / acquaintances / friends / rivals / romantic interest / lovers / enemies / complicated / etc.",
+      "depth": "e.g. 'just met', 'known for weeks', 'deeply bonded'",
+      "info": "1-2 sentences on key dynamics, feelings, history, or tensions"
+    }}
+  }},
+  "long_term_notes": "A 3-6 sentence summary of the entire story: major events, turning points, revelations, emotional arcs, and anything memorable that happened across the conversation."
 }}"""
 
         try:

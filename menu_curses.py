@@ -360,6 +360,37 @@ class MenuCursesInterface:
                     notes = s.get('notes', '')
                     if notes:
                         section("📝  NOTES", notes)
+                    # Relationships
+                    relationships = s.get('relationships', {})
+                    if relationships and row < h - 2:
+                        stdscr.addstr(row, 0, "  💞  RELATIONSHIPS", curses.color_pair(4) | curses.A_BOLD)
+                        row += 1
+                        for pair, rel in relationships.items():
+                            if row >= h - 2: break
+                            status_str = rel.get('status', '')
+                            depth_str = rel.get('depth', '')
+                            info_str = rel.get('info', '')
+                            stdscr.addstr(row, 4, f"{pair}:", curses.color_pair(4))
+                            row += 1
+                            if row < h - 2:
+                                stdscr.addstr(row, 6, f"{status_str}  [{depth_str}]", curses.color_pair(3))
+                                row += 1
+                            if info_str and row < h - 2:
+                                for line in (textwrap.wrap(info_str, w - 10) or []):
+                                    if row >= h - 2: break
+                                    stdscr.addstr(row, 8, line, curses.color_pair(3))
+                                    row += 1
+                        row += 1
+                    # Long-term notes
+                    long_term = s.get('long_term_notes', '')
+                    if long_term and row < h - 2:
+                        stdscr.addstr(row, 0, "  📖  STORY SO FAR", curses.color_pair(4) | curses.A_BOLD)
+                        row += 1
+                        for line in (textwrap.wrap(long_term, w - 6) or ['—']):
+                            if row >= h - 2: break
+                            stdscr.addstr(row, 4, line, curses.color_pair(3))
+                            row += 1
+                        row += 1
                 status = " .s = back to chat | Esc = main menu "
                 try:
                     stdscr.addstr(h - 1, 0, status.center(w)[:w-1], curses.color_pair(1))
@@ -768,6 +799,23 @@ class MenuCursesInterface:
             combined = "  ".join(extras)
             lines.append(combined[:width-1])
         
+        # Line 4: relationships summary (compact)
+        relationships = s.get('relationships', {})
+        if relationships:
+            rel_parts = []
+            for pair, rel in relationships.items():
+                status = rel.get('status', '')
+                rel_parts.append(f"{pair}: {status}")
+            rel_line = "💞 " + " | ".join(rel_parts)
+            lines.append(rel_line[:width-1])
+        
+        # Line 5: long_term_notes first sentence as teaser
+        long_term = s.get('long_term_notes', '')
+        if long_term:
+            first_sentence = long_term.split('.')[0].strip()
+            if first_sentence:
+                lines.append(f"📖 {first_sentence[:width-5]}…")
+        
         return lines
     
     def _show_scene_state_overlay(self, stdscr):
@@ -833,6 +881,39 @@ class MenuCursesInterface:
             notes = s.get('notes', '')
             if notes:
                 section("📝  NOTES", notes)
+            
+            # Relationships
+            relationships = s.get('relationships', {})
+            if relationships and row < h - 2:
+                stdscr.addstr(row, 0, "  💞  RELATIONSHIPS", curses.color_pair(4) | curses.A_BOLD)
+                row += 1
+                for pair, rel in relationships.items():
+                    if row >= h - 2: break
+                    status_str = rel.get('status', '')
+                    depth_str = rel.get('depth', '')
+                    info_str = rel.get('info', '')
+                    stdscr.addstr(row, 4, f"{pair}:", curses.color_pair(4))
+                    row += 1
+                    if row < h - 2:
+                        stdscr.addstr(row, 6, f"{status_str}  [{depth_str}]", curses.color_pair(3))
+                        row += 1
+                    if info_str and row < h - 2:
+                        for line in (textwrap.wrap(info_str, w - 10) or []):
+                            if row >= h - 2: break
+                            stdscr.addstr(row, 8, line, curses.color_pair(3))
+                            row += 1
+                row += 1
+            
+            # Long-term story notes
+            long_term = s.get('long_term_notes', '')
+            if long_term and row < h - 2:
+                stdscr.addstr(row, 0, "  📖  STORY SO FAR", curses.color_pair(4) | curses.A_BOLD)
+                row += 1
+                for line in (textwrap.wrap(long_term, w - 6) or ['—']):
+                    if row >= h - 2: break
+                    stdscr.addstr(row, 4, line, curses.color_pair(3))
+                    row += 1
+                row += 1
         
         # Footer
         footer = " Press any key to close "
@@ -1129,7 +1210,7 @@ class MenuCursesInterface:
         
         msg_lines = [
             "This chat doesn't have scene state tracking yet.",
-            "(location, outfits, plans, notes)",
+            "(location, outfits, plans, notes, relationships, story summary)",
             "",
             "Would you like to analyze the chat log and add it?",
             "A backup will be saved as <chatid>_backup.json",
