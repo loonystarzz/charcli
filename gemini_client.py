@@ -47,6 +47,8 @@ IMPORTANT ROLEPLAYING INSTRUCTIONS:
 7. Use the speech examples as inspiration for your natural dialogue style
 8. CRITICAL FORMATTING RULE: Use quotation marks ("") for all spoken dialogue and asterisks (**) for all actions, movements, and descriptions. Example: "You seem quite... mysterious." *He stares at you across the table, trying to read you* "You know, I think I've taken a liking to you."
 9. RESPONSE LENGTH: Keep your roleplay response under 500 characters. Be vivid but concise. Do not assume too much or roleplay too far, like, dont ask questions and then do more things after it.
+10. THIRD-PARTY CHARACTERS: If a character appears in the roleplay who was not in the original scenario or character description, treat them as a legitimate part of the story. Give them a consistent personality, voice, and behavior — invent one creatively if none is provided, or use any details the user supplies in their message. Once introduced, keep that character consistent across turns. Track them in characters_present and relationships in the scene state.
+11. STRICT USER POV: All roleplay is written exclusively from the user's point of view. You MUST NOT write or describe anything the user's character cannot directly see, hear, or experience at that moment. If the user is in one location and another character is elsewhere, you cannot narrate what that other character is doing, thinking, or feeling — the user simply does not know. Only describe events and actions the user is physically present to witness. Never break this rule for dramatic effect or to fill in story gaps.
 
 SCENE STATE TRACKING (VERY IMPORTANT):
 Every response you give MUST end with a JSON block (on its own line) wrapped in <scene_state> tags.
@@ -56,7 +58,8 @@ The JSON must follow this exact structure:
 <scene_state>
 {{
   "location": "current location/setting where the scene takes place",
-  "characters_present": ["list of character names currently in the scene"],
+  "characters_present": ["list of ALL character names currently in the scene, including third-party characters"],
+  "third_party_characters": {{"CharacterName": "brief personality/role summary for any character not in the original character sheet, so they stay consistent across turns"}},
   "outfits": {{"CharacterName": "what they are currently wearing", "User": "what the user/their character is wearing if known"}},
   "plans": "current plans or goals for the immediate future, or 'none'",
   "notes": "any other important scene context: ongoing events, objects, mood, time of day, etc.",
@@ -67,7 +70,7 @@ The JSON must follow this exact structure:
       "info": "1-2 sentences summarising key dynamics, feelings, history, or tensions between them"
     }}
   }},
-  "long_term_notes": "A running summary of the OVERALL story so far: major events, turning points, revelations, emotional arcs, and anything the characters would remember across sessions. Update and expand this each response — never shrink it unless something is truly resolved."
+  "long_term_notes": "APPEND-ONLY story log. Copy the ENTIRE previous long_term_notes string here EXACTLY, then add a new line at the end starting with '> ' followed by what happened this turn. NEVER rewrite, summarize, or remove existing lines."
 }}
 </scene_state>
 
@@ -76,7 +79,7 @@ Rules for scene state:
 - Update the state to reflect what just happened in this response (new location, outfit change, character left/arrived, new plans formed, relationship shift, story developments, etc.).
 - The state represents the situation AFTER this response, not before.
 - For `relationships`: include an entry for every pair of characters who have interacted. Use "CharacterName<->UserName" format for character-user pairs. Update `status` and `info` whenever the relationship shifts meaningfully.
-- For `long_term_notes`: treat this as a living story journal. Add new developments each turn; preserve important past events. Never reset it. Simply add onto it for new events, do not remove old events unless REALLY unsignificant. U may add time pointers for events, such as "a long time ago" "a few days ago", etc. Do update time points though (Today turns into yesterday, then a few days ago, a few weeks ago, etc, according to how time passes in story.)
+- For `long_term_notes`: this is an APPEND-ONLY log. You MUST copy every single existing line from the previous scene_state's long_term_notes into this field VERBATIM, then add ONE new line at the end beginning with '> ' describing what happened this turn. You are FORBIDDEN from rewriting, condensing, merging, or removing any existing lines. If you cannot fit the full previous log, copy as much as possible starting from the beginning, then append your new line. Time references in old entries (e.g. "today") should be updated naturally (today → yesterday → a few days ago → weeks ago).
 - The roleplay response (dialogue/actions) comes FIRST, then the <scene_state> block.
 
 The enire roleplay is purely consensual and things such as violence are pure roleplay.
@@ -107,6 +110,8 @@ Begin the roleplay now. The user will interact with you, and you must respond as
 <scene_state>
 {json.dumps(scene_state, indent=2)}
 </scene_state>
+REMINDER: In your response's <scene_state>, copy the ENTIRE long_term_notes above VERBATIM, then append one new '> ' line. Do NOT rewrite or summarize existing entries.
+REMINDER: Only narrate what the user's character can directly see or hear right now. Do NOT describe what any other character is doing if the user is not present with them.
 
 My message: {message}"""
             user_message = state_context
@@ -159,7 +164,8 @@ CONVERSATION:
 Respond ONLY with a JSON object (no other text, no markdown) in this exact format:
 {{
   "location": "current location/setting at end of chat",
-  "characters_present": ["list of character names present"],
+  "characters_present": ["list of all character names present, including third-party ones"],
+  "third_party_characters": {{"CharacterName": "brief personality/role summary for any character not in the original character sheet"}},
   "outfits": {{"CharacterName": "what they are wearing", "User": "what user's character wears if mentioned"}},
   "plans": "any plans or goals formed by end of chat, or 'none'",
   "notes": "other important context: ongoing events, objects, mood, time of day, etc.",
@@ -170,7 +176,7 @@ Respond ONLY with a JSON object (no other text, no markdown) in this exact forma
       "info": "1-2 sentences on key dynamics, feelings, history, or tensions"
     }}
   }},
-  "long_term_notes": "A 3-6 sentence summary of the entire story: major events, turning points, revelations, emotional arcs, and anything memorable that happened across the conversation."
+  "long_term_notes": "A chronological log of story events, one entry per line, each starting with '> '. Cover major events, turning points, revelations, and emotional arcs from the conversation. Example format:\n> [session start] Characters first met at the tavern\n> [shortly after] Character revealed their secret"
 }}"""
 
         try:
