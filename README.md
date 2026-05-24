@@ -113,3 +113,6 @@ The project comes with three sample personas:
 - Google Gemini API key (free)
 - Internet connection for API calls
 
+## Future Plans
+
+- Local LLM mode
