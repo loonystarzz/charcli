@@ -1,13 +1,66 @@
 import json
 import os
 import re
-import google.generativeai as genai
+import requests
 from typing import Dict, List, Optional
 
+try:
+    import google.generativeai as genai
+except ImportError:  # only needed in gemini mode
+    genai = None
+
 class GeminiClient:
-    def __init__(self, api_key: str):
-        genai.configure(api_key=api_key)
-        self.model = genai.GenerativeModel('models/gemini-3.1-flash-lite-preview')
+    def __init__(self, api_key: str = "", mode: str = "gemini", llama_url: str = "http://localhost:8080",
+                 llama_model: str = "local", llama_timeout: int = 300, temperature: float = 0.8,
+                 max_tokens: int = 2048):
+        """mode: 'gemini' (Google API) or 'llama' (llama.cpp server on another machine,
+        e.g. llama_url='http://192.168.1.50:8080')."""
+        self.mode = mode
+        self.llama_url = llama_url.rstrip('/')
+        self.llama_model = llama_model
+        self.llama_timeout = llama_timeout
+        self.temperature = temperature
+        self.max_tokens = max_tokens
+        self.model = None
+        if mode == "gemini":
+            if genai is None:
+                raise ImportError("google-generativeai is required for gemini mode")
+            genai.configure(api_key=api_key)
+            self.model = genai.GenerativeModel('models/gemini-3.1-flash-lite-preview')
+        elif mode == "llama":
+            # Force IPv4: hostnames often resolve to IPv6 first, and requests waits out
+            # a full timeout on each dead IPv6 address (curl falls back instantly, requests doesn't).
+            import socket
+            import urllib3.util.connection as _u3c
+            _u3c.allowed_gai_family = lambda: socket.AF_INET
+        else:
+            raise ValueError("mode must be 'gemini' or 'llama'")
+
+    def _generate(self, contents: List[Dict]) -> str:
+        """Generate text from Gemini-format contents using the active backend"""
+        if self.mode == "gemini":
+            return self.model.generate_content(contents).text
+        # llama: convert Gemini format -> OpenAI chat format
+        messages = []
+        for m in contents:
+            role = "assistant" if m['role'] == 'model' else "user"
+            messages.append({"role": role, "content": "\n".join(str(x) for x in m['parts'])})
+        r = requests.post(
+            f"{self.llama_url}/v1/chat/completions",
+            json={"model": self.llama_model, "messages": messages,
+                  "temperature": self.temperature, "max_tokens": self.max_tokens,
+                  # turn off "thinking" on reasoning models (Gemma 4, Qwen3, ...)
+                  "chat_template_kwargs": {"enable_thinking": False}},
+            timeout=(10, self.llama_timeout),  # (connect, read)
+        )
+        r.raise_for_status()
+        choice = r.json()["choices"][0]
+        content = (choice["message"].get("content") or "").strip()
+        if not content:
+            raise RuntimeError(
+                f"Llama server returned empty reply (finish_reason={choice.get('finish_reason')}). "
+                "Model probably spent all tokens thinking, or the context (-c) is too small.")
+        return content
         
     def create_character_prompt(self, character_data: Dict, user_persona: Optional[Dict] = None) -> str:
         """Create a system prompt based on character data"""
@@ -120,8 +173,7 @@ My message: {message}"""
         full_conversation.append({"role": "user", "parts": [user_message]})
         
         try:
-            response = self.model.generate_content(full_conversation)
-            return response.text
+            return self._generate(full_conversation)
         except Exception as e:
             return f"Error: {str(e)}"
     
@@ -180,8 +232,7 @@ Respond ONLY with a JSON object (no other text, no markdown) in this exact forma
 }}"""
 
         try:
-            response = self.model.generate_content([{"role": "user", "parts": [analysis_prompt]}])
-            text = response.text.strip()
+            text = self._generate([{"role": "user", "parts": [analysis_prompt]}]).strip()
             # Strip markdown fences if present
             text = re.sub(r'^```json\s*', '', text)
             text = re.sub(r'^```\s*', '', text)
@@ -192,6 +243,8 @@ Respond ONLY with a JSON object (no other text, no markdown) in this exact forma
     
     def create_chat_session(self, character_data: Dict, user_persona: Optional[Dict] = None) -> str:
         """Create a new chat session with character"""
+        if self.mode != "gemini":
+            return None  # chat sessions are Gemini-only; use send_message in llama mode
         system_prompt = self.create_character_prompt(character_data, user_persona)
         try:
             chat = self.model.start_chat(history=[{"role": "user", "parts": [system_prompt]}])

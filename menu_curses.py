@@ -96,7 +96,7 @@ class MenuCursesInterface:
             stdscr.addstr(0, (w - len(title)) // 2, title, curses.color_pair(1) | curses.A_BOLD)
             
             # Main menu options
-            menu_items = ["Select Character (for new chat)", "Select Persona (all chats)", "Start New Chat", "Load old Chat", "Character Maker", "Persona Maker", "Quit"]
+            menu_items = ["Select Character (for new chat)", "Select Persona (all chats)", "Start New Chat", "Load old Chat", "Character Maker", "Persona Maker", "Backend Settings", "Quit"]
             menu_y = 3
             
             for i, item in enumerate(menu_items):
@@ -167,7 +167,9 @@ class MenuCursesInterface:
                     self.show_character_editor(stdscr)
                 elif self.main_menu_focus == 5:  # Persona Editor
                     self.show_persona_editor(stdscr)
-                elif self.main_menu_focus == 6:  # Quit
+                elif self.main_menu_focus == 6:  # Backend Settings
+                    self.show_backend_settings(stdscr)
+                elif self.main_menu_focus == 7:  # Quit
                     self.running = False
     
     def show_character_selection(self, stdscr):
@@ -1527,6 +1529,115 @@ class MenuCursesInterface:
                     if new_value is not None:
                         fields[field_name]['value'] = new_value
     
+    def _prompt_line(self, stdscr, label, current=""):
+        """Single-line text prompt. Enter=accept, Esc=cancel (returns None)."""
+        h, w = stdscr.getmaxyx()
+        buf = list(current)
+        try:
+            curses.curs_set(1)
+        except Exception:
+            pass
+        while True:
+            stdscr.move(h - 3, 0); stdscr.clrtoeol()
+            stdscr.move(h - 2, 0); stdscr.clrtoeol()
+            stdscr.addstr(h - 3, 2, f"{label} (Enter=save, Esc=cancel):"[:w - 3], curses.color_pair(3))
+            text = "".join(buf)
+            shown = text[-(w - 6):]
+            stdscr.addstr(h - 2, 2, shown)
+            stdscr.move(h - 2, 2 + len(shown))
+            stdscr.refresh()
+            key = stdscr.getch()
+            if key in (10, 13, curses.KEY_ENTER):
+                return text.strip()
+            elif key == 27:
+                return None
+            elif key in (curses.KEY_BACKSPACE, 127, 8):
+                if buf:
+                    buf.pop()
+            elif 32 <= key <= 126:
+                buf.append(chr(key))
+
+    def _save_env(self, updates):
+        """Write key=value pairs to .env (next to this file), keeping other lines."""
+        env_path = os.getenv("CHARCLI_ENV") or os.path.join(os.path.dirname(os.path.realpath(__file__)), ".env")
+        self.env_path = env_path
+        lines = []
+        if os.path.exists(env_path):
+            with open(env_path, "r", encoding="utf-8") as f:
+                lines = f.read().splitlines()
+        remaining = dict(updates)
+        for i, line in enumerate(lines):
+            k = line.split("=", 1)[0].strip()
+            if k in remaining and "=" in line:
+                lines[i] = f"{k}={remaining.pop(k)}"
+        for k, v in remaining.items():
+            lines.append(f"{k}={v}")
+        with open(env_path, "w", encoding="utf-8") as f:
+            f.write("\n".join(lines) + "\n")
+        for k, v in updates.items():
+            os.environ[k] = v
+
+    def show_backend_settings(self, stdscr):
+        """Set LLM mode, Gemini API key, or llama endpoint; saved to .env"""
+        focus = 0
+        status = ""
+        while self.running:
+            mode = os.getenv("LLM_MODE", "gemini")
+            stdscr.clear()
+            h, w = stdscr.getmaxyx()
+            title = "=== Backend Settings ==="
+            stdscr.addstr(0, max(0, (w - len(title)) // 2), title, curses.color_pair(1) | curses.A_BOLD)
+            items = [f"Mode: {mode}  (Enter to toggle gemini/llama)"]
+            if mode == "gemini":
+                key = os.getenv("GEMINI_API_KEY", "")
+                masked = ("*" * 8 + key[-4:]) if len(key) > 4 else ("(not set)" if not key else "****")
+                items.append(f"Gemini API key: {masked}")
+            else:
+                items.append(f"Llama endpoint: {os.getenv('LLAMA_URL') or '(not set)'}")
+            items.append("Back")
+            for i, item in enumerate(items):
+                attr = curses.color_pair(5) | curses.A_BOLD if i == focus else curses.A_NORMAL
+                prefix = "→ " if i == focus else "  "
+                stdscr.addstr(3 + i, 4, (prefix + item)[:w - 5], attr)
+            if status:
+                stdscr.addstr(8, 4, status[:w - 5], curses.color_pair(2))
+            stdscr.addstr(10, 4, "↑↓ navigate, Enter select, q/Esc back", curses.color_pair(3))
+            stdscr.refresh()
+
+            k = stdscr.getch()
+            if k in (ord('q'), 27):
+                break
+            elif k == curses.KEY_UP and focus > 0:
+                focus -= 1
+            elif k == curses.KEY_DOWN and focus < len(items) - 1:
+                focus += 1
+            elif k in (10, 13, curses.KEY_ENTER):
+                if focus == 0:
+                    new_mode = "llama" if mode == "gemini" else "gemini"
+                    self._save_env({"LLM_MODE": new_mode})
+                    status = self._apply_backend()
+                elif focus == 1:
+                    if mode == "gemini":
+                        val = self._prompt_line(stdscr, "Gemini API key")
+                        if val is not None:
+                            self._save_env({"GEMINI_API_KEY": val})
+                            status = self._apply_backend()
+                    else:
+                        val = self._prompt_line(stdscr, "Llama endpoint", os.getenv("LLAMA_URL", "http://"))
+                        if val is not None:
+                            self._save_env({"LLAMA_URL": val})
+                            status = self._apply_backend()
+                else:
+                    break
+
+    def _apply_backend(self):
+        """Rebuild the client from current env settings"""
+        try:
+            self.gemini_client = build_client()
+            return f"Saved to {getattr(self, 'env_path', '.env')}. Now using: {self.gemini_client.mode}"
+        except Exception as e:
+            return f"Saved to .env, but client failed: {e}"
+
     def edit_field_value(self, stdscr, field_label, current_value):
         """Edit a single field value with multi-line support"""
         h, w = stdscr.getmaxyx()
@@ -1750,19 +1861,22 @@ class MenuCursesInterface:
         with open(filepath, 'w', encoding='utf-8') as f:
             json.dump(persona_data, f, indent=2, ensure_ascii=False)
 
+def build_client():
+    """Create the client from env: LLM_MODE=gemini|llama, GEMINI_API_KEY, LLAMA_URL, LLAMA_MODEL"""
+    mode = os.getenv("LLM_MODE", "gemini")
+    if mode == "llama":
+        return GeminiClient(mode="llama",
+                            llama_url=os.getenv("LLAMA_URL") or "http://localhost:8080",
+                            llama_model=os.getenv("LLAMA_MODEL", "local"))
+    return GeminiClient(os.getenv("GEMINI_API_KEY", ""))
+
 def run_menu_curses():
     """Entry point for menu-driven curses mode"""
-    # Load API key
-    api_key = os.getenv("GEMINI_API_KEY")
-    if not api_key:
-        print("Please set GEMINI_API_KEY environment variable")
-        return
-    
-    # Initialize clients
+    # Initialize clients (keys/endpoints can be set from Backend Settings in the menu)
     characters_dir = os.path.join(os.path.dirname(__file__), "characters")
     personas_dir = os.path.join(os.path.dirname(__file__), "personas")
     
-    gemini_client = GeminiClient(api_key)
+    gemini_client = build_client()
     character_manager = CharacterManager(characters_dir)
     persona_manager = PersonaManager(personas_dir)
     
