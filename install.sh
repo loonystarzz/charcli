@@ -12,52 +12,26 @@ echo "Installing $APP_NAME to $INSTALL_DIR..."
 # Create install directory if it doesn't exist
 mkdir -p "$INSTALL_DIR"
 
-# Copy to charcli-bin folder, preserving user data
-if [ -d "$INSTALL_DIR/charcli-bin" ]; then
-    echo "Updating existing installation..."
-    
-    # Backup user data directories
-    if [ -d "$INSTALL_DIR/charcli-bin/characters" ]; then
-        echo "Preserving existing characters..."
-        cp -r "$INSTALL_DIR/charcli-bin/characters" /tmp/charcli_characters_backup_$(date +%s)
-    fi
-    
-    if [ -d "$INSTALL_DIR/charcli-bin/personas" ]; then
-        echo "Preserving existing personas..."
-        cp -r "$INSTALL_DIR/charcli-bin/personas" /tmp/charcli_personas_backup_$(date +%s)
-    fi
-    
-    if [ -d "$INSTALL_DIR/charcli-bin/chats" ]; then
-        echo "Preserving existing chats..."
-        cp -r "$INSTALL_DIR/charcli-bin/chats" /tmp/charcli_chats_backup_$(date +%s)
-    fi
-    
-    # Update application files only (exclude user data directories)
-    echo "Updating application files..."
-    rsync -av --exclude='characters/' --exclude='personas/' --exclude='chats/' --exclude='.git/' --exclude='__pycache__/' "$SOURCE_DIR/" "$INSTALL_DIR/charcli-bin/"
-    
-    # Restore user data directories
-    if [ -d "/tmp/charcli_characters_backup_"* ]; then
-        echo "Restoring characters..."
-        cp -r /tmp/charcli_characters_backup_* "$INSTALL_DIR/charcli-bin/characters"
-        rm -rf /tmp/charcli_characters_backup_*
-    fi
-    
-    if [ -d "/tmp/charcli_personas_backup_"* ]; then
-        echo "Restoring personas..."
-        cp -r /tmp/charcli_personas_backup_* "$INSTALL_DIR/charcli-bin/personas"
-        rm -rf /tmp/charcli_personas_backup_*
-    fi
-    
-    if [ -d "/tmp/charcli_chats_backup_"* ]; then
-        echo "Restoring chats..."
-        cp -r /tmp/charcli_chats_backup_* "$INSTALL_DIR/charcli-bin/chats"
-        rm -rf /tmp/charcli_chats_backup_*
-    fi
-else
-    echo "Installing fresh copy..."
-    cp -r "$SOURCE_DIR" "$INSTALL_DIR/charcli-bin"
+# Refuse to run as root: $HOME would differ and files end up owned by root
+if [ "$(id -u)" -eq 0 ] && [ -n "$SUDO_USER" ]; then
+    echo "Don't run this with sudo; run it as your normal user."
+    exit 1
 fi
+
+DEST="$INSTALL_DIR/charcli-bin"
+mkdir -p "$DEST"
+
+# Copy everything (app files + shipped characters/personas/chats), overwriting same-named files.
+# Nothing is deleted, so user-created characters/personas/chats are kept.
+echo "Copying application files..."
+for item in "$SOURCE_DIR"/* "$SOURCE_DIR"/.[!.]*; do
+    [ -e "$item" ] || continue
+    name="$(basename "$item")"
+    case "$name" in
+        .git|__pycache__) continue ;;
+        *) cp -rf "$item" "$DEST/" ;;
+    esac
+done
 
 # Install Python dependencies
 echo "Installing Python dependencies..."

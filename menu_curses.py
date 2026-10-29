@@ -37,6 +37,9 @@ class MenuCursesInterface:
         self.scroll_offset = 0  # Scroll offset for chat history
         self.scene_state = None  # Current scene state (location, outfits, plans, notes)
         self.scene_view = False  # Toggle for fullscreen scene state view
+        self.scene_scroll = 0
+        self._scene_max_scroll = 0
+        self._scene_page = 10
         self.load_saved_chats()
         
     def run(self):
@@ -322,79 +325,74 @@ class MenuCursesInterface:
             stdscr.clear()
 
             if self.scene_view:
-                # ── SCENE STATE SCREEN ──────────────────────────────────────
+                # ── SCENE STATE SCREEN (scrollable) ─────────────────────────
                 title = f" Scene State — {self.current_character['name']} "
                 stdscr.addstr(0, 0, title.center(w), curses.color_pair(1) | curses.A_BOLD)
-                row = 2
+                head, body = curses.color_pair(4) | curses.A_BOLD, curses.color_pair(3)
+                rows = []  # (x, text, attr)
+                def add_head(text):
+                    rows.append((2, text, head))
+                def add_text(text, x=4, wrap_w=None):
+                    for line in (textwrap.wrap(text, wrap_w or (w - x - 2)) or ['—']):
+                        rows.append((x, line, body))
+                def add_section(label, value):
+                    add_head(label)
+                    add_text(', '.join(value) if isinstance(value, list) else str(value or '—'), 4, w - 6)
+                    rows.append((0, "", 0))
                 if not self.scene_state:
-                    stdscr.addstr(row, 4, "No scene state yet — send a message first.", curses.color_pair(3))
+                    rows.append((4, "No scene state yet — send a message first.", body))
                 else:
-                    s = self.scene_state
-                    def section(label, value):
-                        nonlocal row
-                        if row >= h - 2: return
-                        stdscr.addstr(row, 0, f"  {label}", curses.color_pair(4) | curses.A_BOLD)
-                        row += 1
-                        text = ', '.join(value) if isinstance(value, list) else str(value or '—')
-                        for line in (textwrap.wrap(text, w - 6) or ['—']):
-                            if row >= h - 2: break
-                            stdscr.addstr(row, 4, line, curses.color_pair(3))
-                            row += 1
-                        row += 1
-                    section("📍  LOCATION", s.get('location', ''))
-                    section("👥  CHARACTERS PRESENT", s.get('characters_present', []))
-                    outfits = s.get('outfits', {})
-                    if outfits and row < h - 2:
-                        stdscr.addstr(row, 0, "  👗  OUTFITS", curses.color_pair(4) | curses.A_BOLD)
-                        row += 1
+                    sc = self.scene_state
+                    add_section("📍  LOCATION", sc.get('location', ''))
+                    add_section("👥  CHARACTERS PRESENT", sc.get('characters_present', []))
+                    outfits = sc.get('outfits', {})
+                    if outfits:
+                        add_head("👗  OUTFITS")
                         for name, outfit in outfits.items():
-                            if row >= h - 2: break
-                            stdscr.addstr(row, 4, f"{name}:", curses.color_pair(4))
-                            row += 1
-                            for line in (textwrap.wrap(outfit, w - 8) or ['—']):
-                                if row >= h - 2: break
-                                stdscr.addstr(row, 8, line, curses.color_pair(3))
-                                row += 1
-                        row += 1
-                    plans = s.get('plans', '')
+                            rows.append((4, f"{name}:", curses.color_pair(4)))
+                            add_text(str(outfit), 8, w - 10)
+                        rows.append((0, "", 0))
+                    plans = sc.get('plans', '')
                     if plans and plans.lower() != 'none':
-                        section("🗺   PLANS", plans)
-                    notes = s.get('notes', '')
+                        add_section("🗺   PLANS", plans)
+                    notes = sc.get('notes', '')
                     if notes:
-                        section("📝  NOTES", notes)
-                    # Relationships
-                    relationships = s.get('relationships', {})
-                    if relationships and row < h - 2:
-                        stdscr.addstr(row, 0, "  💞  RELATIONSHIPS", curses.color_pair(4) | curses.A_BOLD)
-                        row += 1
+                        add_section("📝  NOTES", notes)
+                    relationships = sc.get('relationships', {})
+                    if relationships:
+                        add_head("💞  RELATIONSHIPS")
                         for pair, rel in relationships.items():
-                            if row >= h - 2: break
-                            status_str = rel.get('status', '')
-                            depth_str = rel.get('depth', '')
-                            info_str = rel.get('info', '')
-                            stdscr.addstr(row, 4, f"{pair}:", curses.color_pair(4))
-                            row += 1
-                            if row < h - 2:
-                                stdscr.addstr(row, 6, f"{status_str}  [{depth_str}]", curses.color_pair(3))
-                                row += 1
-                            if info_str and row < h - 2:
-                                for line in (textwrap.wrap(info_str, w - 10) or []):
-                                    if row >= h - 2: break
-                                    stdscr.addstr(row, 8, line, curses.color_pair(3))
-                                    row += 1
-                        row += 1
-                    # Long-term notes
-                    long_term = s.get('long_term_notes', '')
-                    if long_term and row < h - 2:
-                        stdscr.addstr(row, 0, "  📖  STORY SO FAR", curses.color_pair(4) | curses.A_BOLD)
-                        row += 1
-                        for line in (textwrap.wrap(long_term, w - 6) or ['—']):
-                            if row >= h - 2: break
-                            stdscr.addstr(row, 4, line, curses.color_pair(3))
-                            row += 1
-                        row += 1
-                status = " .s = back to chat | Esc = main menu "
+                            rows.append((4, f"{pair}:", curses.color_pair(4)))
+                            rows.append((6, f"{rel.get('status', '')}  [{rel.get('depth', '')}]", body))
+                            if rel.get('info', ''):
+                                add_text(rel.get('info', ''), 8, w - 10)
+                        rows.append((0, "", 0))
+                    long_term = sc.get('long_term_notes', '')
+                    if long_term:
+                        add_section("📖  STORY SO FAR", long_term)
+                view_h = max(1, h - 3)  # rows 1..h-3 for content, h-2 input, h-1 footer
+                self._scene_page = view_h
+                self._scene_max_scroll = max(0, len(rows) - view_h)
+                self.scene_scroll = max(0, min(self.scene_scroll, self._scene_max_scroll))
+                for i in range(view_h):
+                    idx = self.scene_scroll + i
+                    if idx >= len(rows):
+                        break
+                    x, text, attr = rows[idx]
+                    if text:
+                        try:
+                            stdscr.addstr(1 + i, x, text[:max(0, w - x - 1)], attr)
+                        except curses.error:
+                            pass
+                if self._scene_max_scroll > 0:
+                    ind = f"↑{int(self.scene_scroll / self._scene_max_scroll * 100)}%" if self.scene_scroll > 0 else "↓more"
+                    try:
+                        stdscr.addstr(0, max(0, w - len(ind) - 1), ind, curses.color_pair(1))
+                    except curses.error:
+                        pass
+                status = " ↑↓/PgUp/PgDn=scroll | /s or Esc = back to chat "
                 try:
+                    stdscr.addstr(h - 2, 0, (">> " + self.input_buffer)[-(w - 1):], curses.A_BOLD)
                     stdscr.addstr(h - 1, 0, status.center(w)[:w-1], curses.color_pair(1))
                 except:
                     pass
@@ -486,9 +484,9 @@ class MenuCursesInterface:
                 # Status line
                 status_y = h - 1
                 if self.scroll_offset > 0:
-                    status = "↑ Scrolled up | ↑↓=scroll PgUp/Dn=page | .r=redo | .s=scene | Esc=menu"
+                    status = "↑ Scrolled up | ↑↓=scroll PgUp/Dn=page | /r=redo /rp=redo+prompt /s=scene | Esc=menu"
                 else:
-                    status = "↑↓=scroll PgUp/Dn=page | ←→=cursor | .r=redo | .s=scene | Esc=menu | Enter=send"
+                    status = "↑↓=scroll PgUp/Dn=page | ←→=cursor | /r=redo /rp=redo+prompt /s=scene | Esc=menu | Enter=send"
                 stdscr.addstr(status_y, 0, status[:w-1], curses.color_pair(3))
             
             stdscr.refresh()
@@ -540,21 +538,39 @@ class MenuCursesInterface:
     def _handle_chat_key(self, stdscr, key, chat_height, max_scroll):
         """Handle key input in chat mode"""
         
-        # When scene view is active, only .s (toggle off) and Esc (main menu) work
+        # When scene view is active: Esc or /s = back to chat, arrows/PgUp/PgDn/Home/End scroll
         if self.scene_view:
-            if key == 27:  # Esc - back to main menu
+            if key == 27:  # Esc - back to chat
                 self.scene_view = False
-                self.save_current_chat()
-                self.current_screen = "main"
-                self.scroll_offset = 0
-            elif key == ord('.'):
-                stdscr.timeout(100)
-                next_key = stdscr.getch()
-                stdscr.timeout(-1)
-                if next_key == ord('s'):
+                self._rebuild_display = True
+            elif key == curses.KEY_UP:
+                self.scene_scroll = max(0, self.scene_scroll - 3)
+            elif key == curses.KEY_DOWN:
+                self.scene_scroll = min(self._scene_max_scroll, self.scene_scroll + 3)
+            elif key == curses.KEY_PPAGE:
+                self.scene_scroll = max(0, self.scene_scroll - self._scene_page)
+            elif key == curses.KEY_NPAGE:
+                self.scene_scroll = min(self._scene_max_scroll, self.scene_scroll + self._scene_page)
+            elif key == curses.KEY_HOME:
+                self.scene_scroll = 0
+            elif key == curses.KEY_END:
+                self.scene_scroll = self._scene_max_scroll
+            elif key in (10, 13, curses.KEY_ENTER):
+                text = self.input_buffer
+                self.input_buffer = ""
+                self._cursor_pos = 0
+                cmd, _ = self._parse_command(text)
+                if cmd in ("s", "scene"):
                     self.scene_view = False
+                    self._rebuild_display = True
+            elif key in (curses.KEY_BACKSPACE, 127, 8):
+                self.input_buffer = self.input_buffer[:-1]
+                self._cursor_pos = len(self.input_buffer)
+            elif 32 <= key <= 126:
+                self.input_buffer += chr(key)
+                self._cursor_pos = len(self.input_buffer)
             return
-        
+
         # Esc - back to main menu
         if key == 27:
             self.save_current_chat()
@@ -582,25 +598,16 @@ class MenuCursesInterface:
             self.scroll_offset = max(0, self.scroll_offset - chat_height)
             return
         
-        # Dot commands: .+r = regenerate, .+s = scene state overlay
-        if key == ord('.') and not self.input_buffer:
-            stdscr.timeout(100)  # Short timeout to detect held keys
-            next_key = stdscr.getch()
-            stdscr.timeout(-1)  # Reset to blocking BEFORE any sub-screen
-            if next_key == ord('r'):
-                self.regenerate_last(stdscr)
-                return
-            elif next_key == ord('s'):
-                self.scene_view = not self.scene_view
+        # Enter - send message
+        if key in (ord('\n'), 13, curses.KEY_ENTER):
+            cmd, arg = self._parse_command(self.input_buffer)
+            if cmd is not None:
+                self.input_buffer = ""
+                self._cursor_pos = 0
+                self.scroll_offset = 0
+                self._run_command(stdscr, cmd, arg)
                 self._rebuild_display = True
                 return
-            elif next_key != -1:
-                # neither r nor s, treat . as normal input
-                self.input_buffer += '.'
-                self._cursor_pos += 1
-            return
-        # Enter - send message
-        if key == ord('\n'):
             if self.input_buffer.strip():
                 self.scroll_offset = 0
                 self._rebuild_display = True
@@ -927,6 +934,31 @@ class MenuCursesInterface:
         stdscr.refresh()
         stdscr.getch()  # Already blocking (timeout=-1 set before this was called)
     
+    def _parse_command(self, text):
+        """Return (command, arg) if text is a /command (leading spaces allowed), else (None, None)."""
+        t = text.lstrip()
+        if not t.startswith('/'):
+            return None, None
+        parts = t[1:].split(None, 1)
+        if not parts:
+            return "", ""
+        return parts[0].lower(), (parts[1].strip() if len(parts) > 1 else "")
+
+    def _run_command(self, stdscr, cmd, arg):
+        """Run a chat slash command: /r /redo, /rp /redoprompt, /s /scene"""
+        if cmd in ("r", "redo"):
+            self.regenerate_last(stdscr)
+        elif cmd in ("rp", "redoprompt"):
+            nudge = arg[:50] if arg else self._prompt_line(stdscr, "Redo nudge", "", max_len=50)
+            if nudge is None:
+                return  # cancelled
+            self.regenerate_last(stdscr, nudge=nudge.strip() or None)
+        elif cmd in ("s", "scene"):
+            self.scene_view = True
+            self.scene_scroll = 0
+        else:
+            self.chat_lines.append(f"[System]: Unknown command /{cmd}. Try /r, /rp, /s")
+
     def send_message(self, stdscr=None):
         """Send message to AI"""
         # Check rate limiting (wait 2 seconds between API calls)
@@ -970,8 +1002,8 @@ class MenuCursesInterface:
             self.chat_lines.append(error_msg)
             self.last_api_call = current_time
     
-    def regenerate_last(self, stdscr):
-        """Regenerate the last AI response"""
+    def regenerate_last(self, stdscr, nudge=None):
+        """Regenerate the last AI response. nudge = optional short extra instruction for this redo only."""
         # Find the last AI message in conversation_history
         if not self.conversation_history:
             self.chat_lines.append("[System]: Nothing to regenerate.")
@@ -1017,13 +1049,19 @@ class MenuCursesInterface:
         # Show "AI is answering..." indicator
         self._show_waiting_indicator(stdscr)
         
+        # History sent to the AI must not include the user message itself (it is sent separately)
+        history_for_api = self.conversation_history[:last_user_idx]
+        msg_for_api = user_msg
+        if nudge:
+            msg_for_api = f"{user_msg}\n\n[Out-of-character instruction for this reply only, follow it without mentioning it: {nudge}]"
+
         # Re-send the user message
         current_persona = self.persona_manager.get_current_persona()
         try:
             raw_response = self.gemini_client.send_message(
                 self.current_character,
-                user_msg,
-                self.conversation_history,
+                msg_for_api,
+                history_for_api,
                 current_persona,
                 self.scene_state
             )
@@ -1109,6 +1147,7 @@ class MenuCursesInterface:
         h, w = stdscr.getmaxyx()
         chat_list = list(self.saved_chats.items())
         chat_focus = 0
+        scroll_top = 0
         
         while self.running:
             stdscr.clear()
@@ -1117,27 +1156,58 @@ class MenuCursesInterface:
             title = "LOAD CHAT"
             stdscr.addstr(0, (w - len(title)) // 2, title, curses.color_pair(1) | curses.A_BOLD)
             
-            # Chat list
+            # Chat list: 4 rows per chat (name/date, last message, persona, blank)
+            h, w = stdscr.getmaxyx()
             list_y = 3
+            ROWS = 4
+            inst_h = 3
+            visible = max(1, (h - list_y - inst_h - 1) // ROWS)
+            if chat_focus < scroll_top:
+                scroll_top = chat_focus
+            elif chat_focus >= scroll_top + visible:
+                scroll_top = chat_focus - visible + 1
+
+            def fit(text, width):
+                text = text.replace('\t', ' ')
+                return text if len(text) <= width else text[:max(0, width - 1)] + "…"
+
+            def put(y, x, text, attr):
+                try:
+                    stdscr.addstr(y, x, text, attr)
+                except curses.error:
+                    pass
+
             if not chat_list:
-                stdscr.addstr(list_y, 4, "No saved chats found.", curses.color_pair(3))
+                put(list_y, 4, "No saved chats found.", curses.color_pair(3))
             else:
-                for i, (chat_id, chat_data) in enumerate(chat_list):
-                    attr = curses.color_pair(5) | curses.A_BOLD if i == chat_focus else curses.A_NORMAL
-                    marker = "→ " if i == chat_focus else "  "
+                for n, i in enumerate(range(scroll_top, min(len(chat_list), scroll_top + visible))):
+                    chat_id, chat_data = chat_list[i]
+                    y = list_y + n * ROWS
+                    focused = i == chat_focus
+                    attr = curses.color_pair(5) | curses.A_BOLD if focused else curses.A_NORMAL
+                    marker = "→ " if focused else "  "
                     char_name = chat_data['character_name']
                     last_updated = chat_data.get('last_updated', 'Unknown')
-                    stdscr.addstr(list_y + i, 4, f"{marker}{char_name} - {last_updated[:19]}", attr)
-            
-            # Instructions
-            inst_y = list_y + max(len(chat_list), 1) + 2
-            instructions = [
-                "↑↓ - Navigate",
-                "Enter - Load chat",
-                "Esc - Back to main menu"
-            ]
-            for i, inst in enumerate(instructions):
-                stdscr.addstr(inst_y + i, 4, inst, curses.color_pair(3))
+                    width = w - 6 - 1
+
+                    # Last non-system message
+                    last_msg = ""
+                    for line in reversed(chat_data.get('chat_lines', [])):
+                        if line.strip() and not line.startswith("[System]:"):
+                            last_msg = line.strip()
+                            break
+                    persona = chat_data.get('persona')
+                    persona_name = persona.get('name') if isinstance(persona, dict) else None
+
+                    put(y, 4, fit(f"{marker}{char_name} - {last_updated[:19]}", w - 5), attr)
+                    put(y + 1, 6, fit(last_msg, width), curses.color_pair(3))
+                    put(y + 2, 6, fit(f"Persona: {persona_name}" if persona_name else "Persona: none", width), curses.color_pair(3))
+                    # row y + 3 stays blank
+
+            # Instructions (pinned to bottom)
+            inst_y = max(list_y + 1, h - inst_h - 1)
+            for i, inst in enumerate(["↑↓ - Navigate", "Enter - Load chat", "Esc - Back to main menu"]):
+                put(inst_y + i, 4, inst, curses.color_pair(3))
             
             stdscr.refresh()
             
@@ -1529,7 +1599,7 @@ class MenuCursesInterface:
                     if new_value is not None:
                         fields[field_name]['value'] = new_value
     
-    def _prompt_line(self, stdscr, label, current=""):
+    def _prompt_line(self, stdscr, label, current="", max_len=None):
         """Single-line text prompt. Enter=accept, Esc=cancel (returns None)."""
         h, w = stdscr.getmaxyx()
         buf = list(current)
@@ -1540,7 +1610,8 @@ class MenuCursesInterface:
         while True:
             stdscr.move(h - 3, 0); stdscr.clrtoeol()
             stdscr.move(h - 2, 0); stdscr.clrtoeol()
-            stdscr.addstr(h - 3, 2, f"{label} (Enter=save, Esc=cancel):"[:w - 3], curses.color_pair(3))
+            counter = f" [{len(buf)}/{max_len}]" if max_len else ""
+            stdscr.addstr(h - 3, 2, f"{label}{counter} (Enter=ok, Esc=cancel):"[:w - 3], curses.color_pair(3))
             text = "".join(buf)
             shown = text[-(w - 6):]
             stdscr.addstr(h - 2, 2, shown)
@@ -1555,7 +1626,8 @@ class MenuCursesInterface:
                 if buf:
                     buf.pop()
             elif 32 <= key <= 126:
-                buf.append(chr(key))
+                if max_len is None or len(buf) < max_len:
+                    buf.append(chr(key))
 
     def _save_env(self, updates):
         """Write key=value pairs to .env (next to this file), keeping other lines."""

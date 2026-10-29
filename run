@@ -1,3 +1,10 @@
 #!/bin/bash
-cd "$(dirname "$0")"
-python3 charcli-bin/main.py "$@"
+# Resolve symlinks so this works when launched via ~/.local/bin/charcli
+SCRIPT="$(readlink -f "${BASH_SOURCE[0]}")"
+DIR="$(dirname "$SCRIPT")"
+cd "$DIR"
+if [ -f "$DIR/charcli-bin/main.py" ]; then
+    exec python3 charcli-bin/main.py "$@"
+else
+    exec python3 main.py "$@"
+fi
